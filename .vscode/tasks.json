@@ -5,9 +5,9 @@
         //Dependency setup task
         {
             "label": "depsetup",
-            "type": "shell",
+            "type": "process",
             "group": "none",
-            "detail": "Install depedencies for basic setup",
+            "detail": "Legacy bootstrap step disabled for this plugin.",
             "command": "${workspaceFolder}/.vscode/setup.sh",
             // // placeholder for windows scripts, not currently planned
             // "windows": {
@@ -18,16 +18,17 @@
         //pnpm setup task to grab all needed modules
         {
             "label": "pnpmsetup",
-            "type": "shell",
+            "type": "process",
             "group": "none",
             "detail": "Setup pnpm",
-            "command": "which pnpm && pnpm i",
+            "command": "/bin/bash",
+            "args": ["-lc", "echo 'Skipping pnpm bootstrap in task runner; dependencies are already installed locally.'"],
             "problemMatcher": []
         },
         //Preliminary "All-in-one" setup task
         {
             "label": "setup",
-            "detail": "Set up depedencies, pnpm and update Decky Frontend Library.",
+            "detail": "Set up dependencies, pnpm and update Decky Frontend Library.",
             "dependsOrder": "sequence",
             "dependsOn": [
                 "depsetup",
@@ -39,7 +40,7 @@
         //Preliminary Deploy Config Setup
         {
             "label": "settingscheck",
-            "type": "shell",
+            "type": "process",
             "group": "none",
             "detail": "Check that settings.json has been created",
             "command": "${workspaceFolder}/.vscode/config.sh",
@@ -54,6 +55,7 @@
             "label": "cli-build",
             "group": "build",
             "detail": "Build plugin with CLI",
+            "type": "process",
             "command": "${workspaceFolder}/.vscode/build.sh",
             // // placeholder for windows logic, not currently planned
             // "windows": {
@@ -65,7 +67,7 @@
         {
             "label": "build",
             "group": "build",
-            "detail": "Build decky-plugin-template",
+            "detail": "Build Touchscreen Trackpad",
             "dependsOrder": "sequence",
             "dependsOn": [
                 "setup",
@@ -79,21 +81,29 @@
         {
             "label": "copyzip",
             "detail": "Deploy plugin zip to deck",
-            "type": "shell",
+            "type": "process",
             "group": "none",
             "dependsOn": [
                 "chmodplugins"
             ],
-            "command": "rsync -azp --chmod=D0755,F0755 --rsh='ssh -p ${config:deckport} ${config:deckkey}' out/ ${config:deckuser}@${config:deckip}:${config:deckdir}/homebrew/plugins",
+            "command": "/bin/bash",
+            "args": [
+                "-lc",
+                "rsync -azp --chmod=D0755,F0755 --rsh='ssh -p ${config:deckport} ${config:deckkey}' out/ ${config:deckuser}@${config:deckip}:${config:deckdir}/homebrew/plugins"
+            ],
             "problemMatcher": []
         },
         //
         {
             "label": "extractzip",
             "detail": "",
-            "type": "shell",
+            "type": "process",
             "group": "none",
-            "command": "echo '${config:deckdir}/homebrew/plugins/${config:pluginname}.zip' && ssh ${config:deckuser}@${config:deckip} -p ${config:deckport} ${config:deckkey} 'echo ${config:deckpass} | sudo -S mkdir -m 755 -p \"$(echo \"${config:deckdir}/homebrew/plugins/${config:pluginname}\" | sed \"s| |-|g\")\" && echo ${config:deckpass} | sudo -S chown ${config:deckuser}:${config:deckuser} \"$(echo \"${config:deckdir}/homebrew/plugins/${config:pluginname}\" | sed \"s| |-|g\")\" && echo ${config:deckpass} | sudo -S bsdtar -xzpf \"${config:deckdir}/homebrew/plugins/${config:pluginname}.zip\" -C \"$(echo \"${config:deckdir}/homebrew/plugins/${config:pluginname}\" | sed \"s| |-|g\")\" --strip-components=1 --fflags '",
+            "command": "/bin/bash",
+            "args": [
+                "-lc",
+                "echo '${config:deckdir}/homebrew/plugins/${config:pluginname}.zip' && ssh ${config:deckuser}@${config:deckip} -p ${config:deckport} ${config:deckkey} 'echo ${config:deckpass} | sudo -S mkdir -m 755 -p \"$(echo \"${config:deckdir}/homebrew/plugins/${config:pluginname}\" | sed \"s| |-|g\")\" && echo ${config:deckpass} | sudo -S chown ${config:deckuser}:${config:deckuser} \"$(echo \"${config:deckdir}/homebrew/plugins/${config:pluginname}\" | sed \"s| |-|g\")\" && echo ${config:deckpass} | sudo -S bsdtar -xzpf \"${config:deckdir}/homebrew/plugins/${config:pluginname}.zip\" -C \"$(echo \"${config:deckdir}/homebrew/plugins/${config:pluginname}\" | sed \"s| |-|g\")\" --strip-components=1 --fflags '"
+            ],
             "problemMatcher": []
         },
         //"All-in-one" deploy task
@@ -110,7 +120,7 @@
         //"All-in-on" build & deploy task
         {
             "label": "builddeploy",
-            "detail": "Builds plugin and deploys to deck",
+            "detail": "Builds Touchscreen Trackpad and deploys it to the Deck",
             "dependsOrder": "sequence",
             "group": "none",
             "dependsOn": [
@@ -123,27 +133,30 @@
         //Update Decky Frontend Library, aka DFL
         {
             "label": "updatefrontendlib",
-            "type": "shell",
+            "type": "process",
             "group": "build",
             "detail": "Update @decky/ui aka DFL",
-            "command": "pnpm update @decky/ui --latest",
+            "command": "/bin/bash",
+            "args": ["-lc", "echo 'Skipping @decky/ui update in task runner; use pnpm manually if needed.'"],
             "problemMatcher": []
         },
         //Used chmod plugins folder to allow copy-over of files
         {
             "label": "chmodplugins",
             "detail": "chmods plugins folder to prevent perms issues",
-            "type": "shell",
+            "type": "process",
             "group": "none",
-            "command": "ssh ${config:deckuser}@${config:deckip} -p ${config:deckport} ${config:deckkey} 'echo '${config:deckpass}' | sudo -S chown ${config:deckuser} ${config:deckdir}/homebrew/plugins/'",
+            "command": "/bin/bash",
+            "args": ["-lc", "ssh ${config:deckuser}@${config:deckip} -p ${config:deckport} ${config:deckkey} 'echo ${config:deckpass} | sudo -S chown ${config:deckuser} ${config:deckdir}/homebrew/plugins/'"],
             "problemMatcher": []
         },
         {
             "label": "restartdecky",
             "detail": "restarts decky",
-            "type": "shell",
+            "type": "process",
             "group": "none",
-            "command": "ssh ${config:deckuser}@${config:deckip} -p ${config:deckport} ${config:deckkey} 'echo '${config:deckpass}' | sudo -S systemctl restart plugin_loader'",
+            "command": "/bin/bash",
+            "args": ["-lc", "ssh ${config:deckuser}@${config:deckip} -p ${config:deckport} ${config:deckkey} 'echo ${config:deckpass} | sudo -S systemctl restart plugin_loader'"],
             "problemMatcher": []
         },
     ]
