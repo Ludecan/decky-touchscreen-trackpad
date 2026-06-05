@@ -4,10 +4,12 @@ Decky control panel for the touchscreen trackpad daemon.
 
 ## What it does
 
-This plugin talks to the daemon over its JSON IPC socket and uses systemd to start, stop, and restart the service. The daemon remains the single source of truth for runtime config.
+This plugin packages the daemon binary and installer script, then calls the daemon's own installer with one button. After that it talks to the daemon over its JSON IPC socket and uses the user's systemd instance to start, stop, and restart the service. The daemon remains the single source of truth for runtime config.
 
 ## Current scope
 
+- One-click daemon install into the Deck user's home directory
+- Touchscreen-only udev rule plus uinput access rule
 - Enable or disable the daemon runtime config
 - Tune core motion sliders
 - Control the systemd service from Game Mode
@@ -15,7 +17,11 @@ This plugin talks to the daemon over its JSON IPC socket and uses systemd to sta
 
 ## Notes on permissions
 
-Starting and stopping the daemon requires system-level permission. The plugin uses `sudo -n systemctl ...` from the Decky backend, so the host should provide a narrow passwordless rule or another root-capable service path.
+Starting and stopping the daemon no longer needs sudo. The plugin uses `systemctl --user ...`, and the install button writes the user service plus the rules needed for the touchscreen and `/dev/uinput`.
+
+The actual install logic lives in the daemon repo's `scripts/install-daemon.sh`; the plugin just bundles and invokes it.
+
+The installer creates a stable `/dev/input/touchscreen-trackpad` symlink for the touchscreen and configures the daemon to use it, so the runtime does not need to enumerate all input devices.
 
 ## Build
 
@@ -36,18 +42,36 @@ make builddeploy
 
 ## Deploy
 
-The repo includes VS Code tasks that build the plugin, copy the zip to the SteamOS device, unpack it, and restart Decky.
+The repo assumes the plugin directory itself is mounted into the distrobox container at `/home/deck/homebrew/plugins/Touchscreen-Trackpad`.
 
-1. Open [/.vscode/defsettings.json](/home/deck/workspace/decky-touchscreen-trackpad/.vscode/defsettings.json) and set `pluginname` to `Touchscreen Trackpad`.
-2. Make sure the SteamOS device connection settings in that file match your Legion Go 2.
-3. Run the `builddeploy` task from VS Code, or run `build` and then `deploy`.
-4. If you only changed frontend code, `builddeploy` is usually enough.
-5. If Decky does not pick up the change immediately, run the `restartdecky` task.
+1. Make sure the mounted path exists inside the container.
+2. Make sure the mounted path is writable by the `deck` user inside the container.
+3. If it is not, fix the host permissions first, for example: `sudo chown -R deck:deck /home/deck/homebrew/plugins/Touchscreen-Trackpad`.
+4. Run `make builddeploy` from the distrobox container.
+5. If you only changed frontend code, `make builddeploy` is usually enough.
+6. Restart Decky on the host if it does not pick up the change immediately.
 
-The deploy tasks expect the built zip in `out/`, then rsync it to `${config:deckdir}/homebrew/plugins` and extract it on the Deck.
+The build step now also expects a packaged daemon binary in `assets/daemon/touchscreen-trackpad`, so the install button can lay down the user service and permissions without asking the user to build the Rust repo on-device.
+It also expects `assets/daemon/install-daemon.sh` and `assets/daemon/uninstall-daemon.sh`, so the UI can toggle the button between install and uninstall without reimplementing the daemon repo logic.
 
-The `Makefile` deploy target uses `rsync` directly to `~/homebrew/plugins/<plugin-name>` on the Deck, which is easier to run from a terminal and avoids the Decky CLI bootstrap path.
+The `Makefile` deploy target uses `rsync` directly into `/home/deck/homebrew/plugins/Touchscreen-Trackpad` through the mounted host path, which avoids SSH entirely for local development.
 
 ## Socket defaults
 
 The backend checks `TOUCHSCREEN_TRACKPAD_SOCKET` first, then falls back to `/run/touchscreen-trackpad.sock` and `/tmp/touchscreen-trackpad.sock`.
+
+# Container creation
+distrobox rm dev
+distrobox create --name dev --image ubuntu:24.04 --volume /home/deck/homebrew/plugins/Touchscreen-Trackpad:/home/deck/homebrew/plugins/Touchscreen-Trackpad:rw
+
+sudo apt update
+sudo apt install -y git build-essential python3
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt install -y nodejs
+npm install -g npm@11.14.1
+
+
+
+sudo npm install -g pnpm

@@ -5,21 +5,25 @@ SETTINGS_FILE ?= .vscode/settings.json
 SETTINGS_JSON := $(if $(wildcard $(SETTINGS_FILE)),$(SETTINGS_FILE),.vscode/defsettings.json)
 
 PLUGIN_NAME ?= $(shell python3 -c "import json, pathlib; p=pathlib.Path('$(SETTINGS_JSON)'); print(json.load(p.open(encoding='utf-8')).get('pluginname', 'Touchscreen Trackpad'))")
-REMOTE_HOST ?= $(shell python3 -c "import json, pathlib; p=pathlib.Path('$(SETTINGS_JSON)'); print(json.load(p.open(encoding='utf-8')).get('deckip', ''))")
-REMOTE_PORT ?= $(shell python3 -c "import json, pathlib; p=pathlib.Path('$(SETTINGS_JSON)'); print(json.load(p.open(encoding='utf-8')).get('deckport', '22'))")
-REMOTE_USER ?= $(shell python3 -c "import json, pathlib; p=pathlib.Path('$(SETTINGS_JSON)'); print(json.load(p.open(encoding='utf-8')).get('deckuser', 'deck'))")
-REMOTE_DIR ?= /home/deck/homebrew/plugins
-SSH_OPTS ?=
+DEPLOY_ROOT ?= /home/deck/homebrew/plugins/Touchscreen-Trackpad
+DAEMON_REPO ?= ../touchscreen-trackpad
+DAEMON_BINARY ?= $(DAEMON_REPO)/target/release/touchscreen-trackpad
+DAEMON_INSTALLER ?= $(DAEMON_REPO)/scripts/install-daemon.sh
+DAEMON_UNINSTALLER ?= $(DAEMON_REPO)/scripts/uninstall-daemon.sh
+DAEMON_BUNDLE ?= assets/daemon/touchscreen-trackpad
+INSTALLER_BUNDLE ?= assets/daemon/install-daemon.sh
+UNINSTALLER_BUNDLE ?= assets/daemon/uninstall-daemon.sh
 
 PLUGIN_SLUG := $(shell printf '%s' '$(PLUGIN_NAME)' | sed 's| |-|g')
-REMOTE_PLUGIN_DIR := $(REMOTE_DIR)/$(PLUGIN_SLUG)
+DEPLOY_DIR := $(DEPLOY_ROOT)
 
-.PHONY: build deploy builddeploy clean watch help
+.PHONY: build package-daemon deploy builddeploy clean watch help
 
 help:
 	@printf '%s\n' \
 		'Available targets:' \
 		'  make build       Build the frontend bundle with pnpm or corepack' \
+		'  make package-daemon Build and bundle the Rust daemon binary and installer' \
 		'  make deploy      Sync plugin files to the Deck over SSH' \
 		'  make builddeploy Build first, then deploy' \
 		'  make clean       Remove the dist directory' \
@@ -35,21 +39,42 @@ build:
 		exit 1; \
 	fi
 
-deploy:
-	@if [[ -z '$(REMOTE_HOST)' ]]; then \
-		echo 'Remote host is not configured. Set deckip in .vscode/settings.json or pass REMOTE_HOST=...'; \
+package-daemon:
+	@if [[ ! -x '$(DAEMON_BINARY)' ]]; then \
+		echo 'Daemon binary not found at $(DAEMON_BINARY). Build the touchscreen-trackpad repo first.'; \
 		exit 1; \
 	fi
-	@if ! ssh -p $(REMOTE_PORT) $(SSH_OPTS) -o BatchMode=yes -o ConnectTimeout=5 $(REMOTE_USER)@$(REMOTE_HOST) true >/dev/null 2>&1; then \
-		echo 'SSH is not reachable on $(REMOTE_HOST):$(REMOTE_PORT). Start sshd on the SteamOS device or check the hostname/IP.'; \
+	@if [[ ! -f '$(DAEMON_INSTALLER)' ]]; then \
+		echo 'Daemon installer not found at $(DAEMON_INSTALLER).'; \
 		exit 1; \
 	fi
-	@ssh -p $(REMOTE_PORT) $(SSH_OPTS) $(REMOTE_USER)@$(REMOTE_HOST) "mkdir -p '$(REMOTE_PLUGIN_DIR)'"
-	@rsync -azp -e "ssh -p $(REMOTE_PORT) $(SSH_OPTS)" \
-		dist package.json plugin.json main.py README.md LICENSE assets py_modules defaults decky.pyi \
-		$(REMOTE_USER)@$(REMOTE_HOST):'$(REMOTE_PLUGIN_DIR)'/
+	@if [[ ! -f '$(DAEMON_UNINSTALLER)' ]]; then \
+		echo 'Daemon uninstaller not found at $(DAEMON_UNINSTALLER).'; \
+		exit 1; \
+	fi
+	@mkdir -p '$(dir $(DAEMON_BUNDLE))'
+	@cp '$(DAEMON_BINARY)' '$(DAEMON_BUNDLE)'
+	@chmod 755 '$(DAEMON_BUNDLE)'
+	@cp '$(DAEMON_INSTALLER)' '$(INSTALLER_BUNDLE)'
+	@chmod 755 '$(INSTALLER_BUNDLE)'
+	@cp '$(DAEMON_UNINSTALLER)' '$(UNINSTALLER_BUNDLE)'
+	@chmod 755 '$(UNINSTALLER_BUNDLE)'
 
-builddeploy: build deploy
+deploy:
+	@if [[ ! -d '$(DEPLOY_ROOT)' ]]; then \
+		echo 'Deploy root $(DEPLOY_ROOT) is not mounted. Mount /home/deck/homebrew/plugins/Touchscreen-Trackpad into the container first.'; \
+		exit 1; \
+	fi
+	@if [[ ! -w '$(DEPLOY_ROOT)' ]]; then \
+		echo 'Deploy root $(DEPLOY_ROOT) is mounted but not writable from this container.'; \
+		echo 'Fix host permissions, for example: sudo chown -R deck:deck /home/deck/homebrew/plugins/Touchscreen-Trackpad'; \
+		exit 1; \
+	fi
+	@rsync -rltz --delete --no-owner --no-group --no-perms \
+		dist package.json plugin.json main.py README.md LICENSE assets py_modules defaults decky.pyi \
+		'$(DEPLOY_DIR)'/
+
+builddeploy: package-daemon build deploy
 
 watch:
 	@if command -v pnpm >/dev/null 2>&1; then \

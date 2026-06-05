@@ -34,6 +34,8 @@ type DaemonState = {
   connected: boolean;
   service_active: boolean;
   service_control_ready?: boolean;
+  daemon_bundle_ready?: boolean;
+  daemon_installed?: boolean;
   service_status?: {
     active_state: string;
     sub_state: string;
@@ -48,6 +50,8 @@ type PartialDaemonConfig = Partial<DaemonConfig>;
 
 const getState = callable<[], DaemonState>("get_state");
 const setConfig = callable<[patch: PartialDaemonConfig], DaemonState>("set_config");
+const installDaemon = callable<[], DaemonState>("install_daemon");
+const uninstallDaemon = callable<[], DaemonState>("uninstall_daemon");
 const startDaemon = callable<[], DaemonState>("start_daemon");
 const stopDaemon = callable<[], DaemonState>("stop_daemon");
 const restartDaemon = callable<[], DaemonState>("restart_daemon");
@@ -136,6 +140,9 @@ function SectionCard({ title, subtitle, children }: { title: string; subtitle: s
   return (
     <section
       style={{
+        width: "100%",
+        minWidth: 0,
+        boxSizing: "border-box",
         padding: "1rem",
         borderRadius: 18,
         background: "rgba(13, 18, 30, 0.88)",
@@ -171,7 +178,7 @@ function SliderRow({
 }) {
   return (
     <label style={{ display: "block", marginBottom: "0.9rem" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", marginBottom: "0.35rem" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", marginBottom: "0.35rem", minWidth: 0 }}>
         <span style={{ fontSize: "0.9rem", color: "#e8ebf5", fontWeight: 600 }}>{label}</span>
         <span style={{ fontSize: "0.85rem", color: "#aeb5c7" }}>{format(value)}</span>
       </div>
@@ -193,6 +200,7 @@ function Content() {
   const [config, setLocalConfig] = useState<DaemonConfig>(defaultConfig);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [installing, setInstalling] = useState(false);
 
   const refresh = async () => {
     setLoading(true);
@@ -244,6 +252,29 @@ function Content() {
     }
   };
 
+  const runInstall = async () => {
+    setInstalling(true);
+    try {
+      const next = state?.daemon_installed ? await uninstallDaemon() : await installDaemon();
+      setState(next);
+      if (next.config) {
+        setLocalConfig(normalizeConfig(next.config));
+      }
+      toaster.toast({
+        title: state?.daemon_installed ? "Daemon uninstalled" : "Daemon installed",
+        body: state?.daemon_installed
+          ? "The user service, permissions, and bundled daemon files were removed."
+          : "The user service and permissions were installed.",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      toaster.toast({ title: state?.daemon_installed ? "Daemon uninstall failed" : "Daemon install failed", body: message });
+      await refresh();
+    } finally {
+      setInstalling(false);
+    }
+  };
+
   const toggleEnabled = async (enabled: boolean) => {
     await applyPatch({ global: { enabled } });
   };
@@ -279,6 +310,8 @@ function Content() {
 
   const serviceActive = state?.service_active ?? false;
   const controlReady = state?.service_control_ready ?? false;
+  const bundleReady = state?.daemon_bundle_ready ?? false;
+  const daemonInstalled = state?.daemon_installed ?? false;
   const connected = state?.connected ?? false;
   const serviceStatus = state?.service_status;
   const statusLabel = loading
@@ -294,6 +327,9 @@ function Content() {
       style={{
         minHeight: "100%",
         padding: "1rem",
+        width: "100%",
+        boxSizing: "border-box",
+        overflowX: "hidden",
         background: "linear-gradient(160deg, rgba(6, 10, 18, 0.98), rgba(13, 21, 37, 0.94))",
       }}
     >
@@ -302,7 +338,9 @@ function Content() {
           display: "flex",
           flexDirection: "column",
           gap: "1rem",
-          maxWidth: 920,
+          width: "100%",
+          maxWidth: "100%",
+          boxSizing: "border-box",
           margin: "0 auto",
         }}
       >
@@ -314,17 +352,17 @@ function Content() {
             border: "1px solid rgba(137, 145, 175, 0.16)",
           }}
         >
-          <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", alignItems: "flex-start" }}>
-            <div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", alignItems: "stretch" }}>
+            <div style={{ width: "100%", minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.35rem" }}>
                 <div className={staticClasses.Title}>Touchscreen Trackpad</div>
                 <Badge active={connected} label={statusLabel} />
               </div>
               <div style={{ color: "#aeb5c7", fontSize: "0.92rem", maxWidth: 640 }}>
-                Control the daemon directly over its JSON socket and manage the systemd service from Game Mode.
+                Install the daemon, manage the user service from Game Mode, and tune the runtime config over JSON IPC.
               </div>
             </div>
-            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", justifyContent: "flex-start", width: "100%" }}>
               <ButtonItem layout="below" onClick={() => void refresh()}>
                 Refresh
               </ButtonItem>
@@ -336,20 +374,27 @@ function Content() {
           <div style={{ marginTop: "0.45rem", fontSize: "0.82rem", color: "#8f98ad" }}>
             Service: {serviceStatus?.active_state ?? "unknown"} / {serviceStatus?.sub_state ?? "unknown"} / {serviceStatus?.unit_file_state ?? "unknown"}
           </div>
+          <div style={{ marginTop: "0.45rem", fontSize: "0.82rem", color: "#8f98ad" }}>
+            Bundle: {bundleReady ? "ready" : "missing"} • Install: {daemonInstalled ? "installed" : "not installed"}
+          </div>
         </section>
 
         <PanelSection title="Core">
           <PanelSectionRow>
             <SectionCard
               title="Daemon control"
-              subtitle="Start or stop the service, then flip runtime config independently for debugging."
+              subtitle="Install the daemon once, then start or stop the service and tune runtime config from Game Mode."
             >
               <div style={{ display: "flex", flexDirection: "column", gap: "0.9rem" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
                   <Badge active={serviceActive} label={serviceActive ? "Running" : "Stopped"} />
+                  <Badge active={daemonInstalled} label={daemonInstalled ? "Installed" : "Not installed"} />
                   <Badge active={controlReady} label={controlReady ? "Control ready" : "No service control"} />
                 </div>
                 <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                  <ButtonItem layout="below" onClick={() => void runInstall()} disabled={installing || !bundleReady}>
+                    {daemonInstalled ? "Uninstall daemon" : "Install daemon"}
+                  </ButtonItem>
                   <ButtonItem layout="below" onClick={() => void runServiceAction(startDaemon)} disabled={serviceActive || !controlReady}>
                     Start daemon
                   </ButtonItem>
@@ -364,7 +409,7 @@ function Content() {
                   </ButtonItem>
                 </div>
                 <div style={{ color: "#aeb5c7", fontSize: "0.82rem" }}>
-                  If control is unavailable, the backend likely needs root or a narrow passwordless sudo rule for systemctl.
+                  The installer writes a user service, a touchscreen symlink rule, and a uinput permission rule. If the button is disabled, the packaged daemon binary is missing from the plugin bundle.
                 </div>
               </div>
             </SectionCard>
