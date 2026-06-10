@@ -10,6 +10,8 @@ import traceback
 from pathlib import Path
 from datetime import datetime, timezone
 
+import tomllib
+
 import decky
 
 
@@ -44,7 +46,7 @@ class Plugin:
         self.default_config = {
             "global": {"enabled": True},
             "region": {"x_min": 0.5, "x_max": 1.0, "y_min": 0.0, "y_max": 1.0},
-            "motion": {"sensitivity": 1.0, "accel_strength": 0.4, "smoothing": 0.1, "deadzone": 0.0},
+            "motion": {"sensitivity": 100, "accel_strength": 0.4, "accel_exponent": 1.8, "smoothing": 0.1, "deadzone": 0.0},
             "inertia": {"enabled": True, "friction": 0.92, "cutoff": 0.01},
         }
 
@@ -97,6 +99,68 @@ class Plugin:
     def _bundle_config_path(self):
         return self.plugin_root / "assets" / "config.toml"
 
+    def _config_file_path(self):
+        return self.install_root / "config.toml"
+
+    def _toml_scalar(self, value):
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, (int, float)):
+            return repr(value)
+        return json.dumps(value)
+
+    def _serialize_config(self, config):
+        sections = ["global", "region", "motion", "inertia"]
+        lines = []
+
+        for section in sections:
+            section_values = config.get(section, {}) if isinstance(config, dict) else {}
+            lines.append(f"[{section}]")
+            for key, value in section_values.items():
+                lines.append(f"{key} = {self._toml_scalar(value)}")
+            lines.append("")
+
+        return "\n".join(lines).rstrip() + "\n"
+
+    def _read_config_file(self):
+        for path in (self._config_file_path(), self._bundle_config_path()):
+            if not path.exists():
+                continue
+
+            try:
+                with path.open("rb") as handle:
+                    loaded = tomllib.load(handle)
+                if isinstance(loaded, dict):
+                    return _deep_merge(self.default_config, loaded)
+            except Exception as error:
+                decky.logger.warning(f"Failed to read config from {path}: {error}")
+
+        return dict(self.default_config)
+
+    def _write_config_file(self, config):
+        self.install_root.mkdir(parents=True, exist_ok=True)
+        self._config_file_path().write_text(self._serialize_config(config), encoding="utf-8")
+
+    def _subprocess_env(self):
+        env = os.environ.copy()
+        env.pop("LD_LIBRARY_PATH", None)
+        env.pop("LD_PRELOAD", None)
+        env.pop("PYTHONHOME", None)
+        env.pop("PYTHONPATH", None)
+
+        runtime_dir = env.get("XDG_RUNTIME_DIR")
+        if not runtime_dir:
+            runtime_dir = f"/run/user/{os.getuid()}"
+            if Path(runtime_dir).exists():
+                env["XDG_RUNTIME_DIR"] = runtime_dir
+
+        if "DBUS_SESSION_BUS_ADDRESS" not in env and runtime_dir:
+            bus_path = Path(runtime_dir) / "bus"
+            if bus_path.exists():
+                env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={bus_path}"
+
+        return env
+
     def _service_command(self, action):
         scope = self.systemctl_scope if self.systemctl_scope in {"user", "system"} else "user"
         return ["systemctl", f"--{scope}", action, self.service_name]
@@ -105,7 +169,7 @@ class Plugin:
         scope = self.systemctl_scope if self.systemctl_scope in {"user", "system"} else "user"
         command = ["systemctl", f"--{scope}", *args]
 
-        completed = subprocess.run(command, capture_output=True, text=True, check=False)
+        completed = subprocess.run(command, capture_output=True, text=True, env=self._subprocess_env(), check=False)
         if completed.returncode != 0:
             stderr = completed.stderr.strip() or completed.stdout.strip() or "systemctl command failed"
             raise RuntimeError(stderr)
@@ -137,6 +201,7 @@ class Plugin:
             capture_output=True,
             text=True,
             input=f"{auth_password}\n",
+            env=self._subprocess_env(),
             check=False,
         )
 
@@ -170,7 +235,7 @@ class Plugin:
         self._ensure_log_dir()
 
         if self._service_active():
-            subprocess.run(self._service_command("stop"), capture_output=True, text=True, check=False)
+            subprocess.run(self._service_command("stop"), capture_output=True, text=True, env=self._subprocess_env(), check=False)
 
         if config_source.exists():
             install_config.write_text(config_source.read_text(encoding="utf-8"), encoding="utf-8")
@@ -234,8 +299,8 @@ class Plugin:
                 except Exception:
                     pass
 
-            subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True, check=False)
-            completed = subprocess.run(["systemctl", "--user", "enable", "--now", self.service_name], capture_output=True, text=True, check=False)
+            subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True, env=self._subprocess_env(), check=False)
+            completed = subprocess.run(["systemctl", "--user", "enable", "--now", self.service_name], capture_output=True, text=True, env=self._subprocess_env(), check=False)
             if completed.returncode != 0:
                 raise RuntimeError(
                     self._format_subprocess_error(["systemctl", "--user", "enable", "--now", self.service_name], completed, "Failed to enable daemon")
@@ -251,10 +316,10 @@ class Plugin:
 
     def _uninstall_daemon(self, auth_password=""):
         if self._service_control_ready():
-            subprocess.run(self._service_command("stop"), capture_output=True, text=True, check=False)
+            subprocess.run(self._service_command("stop"), capture_output=True, text=True, env=self._subprocess_env(), check=False)
 
-        subprocess.run(["systemctl", "--user", "disable", self.service_name], capture_output=True, text=True, check=False)
-        subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True, check=False)
+        subprocess.run(["systemctl", "--user", "disable", self.service_name], capture_output=True, text=True, env=self._subprocess_env(), check=False)
+        subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True, env=self._subprocess_env(), check=False)
 
         self.user_unit_path.unlink(missing_ok=True)
         self.install_binary.unlink(missing_ok=True)
@@ -317,21 +382,12 @@ class Plugin:
 
         return response
 
-    def _run_systemctl(self, action):
-        command = self._service_command(action)
-
-        completed = subprocess.run(command, capture_output=True, text=True, check=False)
-        if completed.returncode != 0:
-            stderr = completed.stderr.strip() or completed.stdout.strip() or f"systemctl {action} failed"
-            raise RuntimeError(stderr)
-
-        return {"ok": True, "stdout": completed.stdout.strip(), "stderr": completed.stderr.strip()}
-
     def _read_service_status(self):
         completed = subprocess.run(
             ["systemctl", f"--{self.systemctl_scope}", "show", self.service_name, "--property=ActiveState", "--property=SubState", "--property=UnitFileState"],
             capture_output=True,
             text=True,
+            env=self._subprocess_env(),
             check=False,
         )
 
@@ -357,61 +413,33 @@ class Plugin:
 
     def _service_control_ready(self):
         command = self._service_command("status")
-        completed = subprocess.run(command, capture_output=True, text=True, check=False)
+        completed = subprocess.run(command, capture_output=True, text=True, env=self._subprocess_env(), check=False)
         return completed.returncode in (0, 3)
 
     def _service_active(self):
-        completed = subprocess.run(["systemctl", f"--{self.systemctl_scope}", "is-active", self.service_name], capture_output=True, text=True, check=False)
+        completed = subprocess.run(["systemctl", f"--{self.systemctl_scope}", "is-active", self.service_name], capture_output=True, text=True, env=self._subprocess_env(), check=False)
         return completed.returncode == 0
 
-    def _normalize_state(self, state):
-        config = state.get("config") if isinstance(state, dict) else None
+    async def get_state(self):
+        service_active = self._service_active()
+        service_status = self._read_service_status()
         return {
-            "connected": bool(state.get("connected", True)) if isinstance(state, dict) else False,
-            "service_active": self._service_active(),
-            "service_status": self._read_service_status(),
+            "connected": service_active,
+            "service_active": service_active,
+            "service_status": service_status,
             "service_control_ready": self._service_control_ready(),
             "socket_path": self._resolve_socket_path(),
             "daemon_bundle_ready": self._daemon_bundle_ready(),
             "daemon_installed": self._daemon_installed(),
-            "config": config if config is not None else None,
+            "config": self._read_config_file(),
         }
-
-    async def get_state(self):
-        try:
-            response = await asyncio.to_thread(self._rpc, "config/get")
-            return self._normalize_state(response)
-        except Exception as error:
-            self._log_exception("Unable to read daemon state", error)
-            decky.logger.warning(f"Unable to read daemon state: {error}")
-            return {
-                "connected": False,
-                "service_active": self._service_active(),
-                "service_status": self._read_service_status(),
-                "service_control_ready": self._service_control_ready(),
-                "socket_path": self._resolve_socket_path(),
-                "daemon_bundle_ready": self._daemon_bundle_ready(),
-                "daemon_installed": self._daemon_installed(),
-                "config": None,
-            }
 
     async def set_config(self, patch):
         try:
-            response = await asyncio.to_thread(self._rpc, "config/set", patch)
-            if isinstance(response, dict) and "config" in response:
-                return self._normalize_state(response)
-
-            merged = _deep_merge(self.default_config, patch)
-            return {
-                "connected": True,
-                "service_active": self._service_active(),
-                "service_status": self._read_service_status(),
-                "service_control_ready": self._service_control_ready(),
-                "socket_path": self._resolve_socket_path(),
-                "daemon_bundle_ready": self._daemon_bundle_ready(),
-                "daemon_installed": self._daemon_installed(),
-                "config": merged,
-            }
+            current_config = self._read_config_file()
+            merged_config = _deep_merge(current_config, patch)
+            await asyncio.to_thread(self._write_config_file, merged_config)
+            return await self.get_state()
         except Exception as error:
             self._log_exception("Failed to update config", error)
             raise

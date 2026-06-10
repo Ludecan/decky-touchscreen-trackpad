@@ -1,4 +1,4 @@
-import { ButtonItem, ModalRoot, PanelSection, PanelSectionRow, staticClasses, TextField } from "@decky/ui";
+import { ButtonItem, ModalRoot, PanelSection, PanelSectionRow, SliderField, staticClasses, TextField } from "@decky/ui";
 import { callable, definePlugin, toaster } from "@decky/api";
 import { useEffect, useRef, useState } from "react";
 import { FaWaveSquare } from "react-icons/fa";
@@ -13,6 +13,7 @@ type RegionConfig = {
 type MotionConfig = {
   sensitivity: number;
   accel_strength: number;
+  accel_exponent: number;
   smoothing: number;
   deadzone: number;
 };
@@ -60,8 +61,9 @@ const defaultConfig: DaemonConfig = {
   global: { enabled: true },
   region: { x_min: 0.5, x_max: 1.0, y_min: 0.0, y_max: 1.0 },
   motion: {
-    sensitivity: 1.0,
+    sensitivity: 100,
     accel_strength: 0.4,
+    accel_exponent: 1.8,
     smoothing: 0.1,
     deadzone: 0.0,
   },
@@ -142,6 +144,7 @@ function normalizeConfig(config: Partial<DaemonConfig> | null | undefined): Daem
     motion: {
       sensitivity: config?.motion?.sensitivity ?? defaultConfig.motion.sensitivity,
       accel_strength: config?.motion?.accel_strength ?? defaultConfig.motion.accel_strength,
+      accel_exponent: config?.motion?.accel_exponent ?? defaultConfig.motion.accel_exponent,
       smoothing: config?.motion?.smoothing ?? defaultConfig.motion.smoothing,
       deadzone: config?.motion?.deadzone ?? defaultConfig.motion.deadzone,
     },
@@ -239,21 +242,19 @@ function SliderRow({
   onChange: (value: number) => void;
 }) {
   return (
-    <label style={{ display: "block", marginBottom: "0.9rem" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", marginBottom: "0.35rem", minWidth: 0 }}>
-        <span style={{ fontSize: "0.9rem", color: "#e8ebf5", fontWeight: 600 }}>{label}</span>
-        <span style={{ fontSize: "0.85rem", color: "#aeb5c7" }}>{format(value)}</span>
-      </div>
-      <input
-        type="range"
+    <div style={{ marginBottom: "0.9rem" }}>
+      <SliderField
+        label={label}
+        description={format(value)}
+        value={value}
         min={min}
         max={max}
         step={step}
-        value={value}
-        onChange={(event) => onChange(event.currentTarget.valueAsNumber)}
-        style={{ width: "100%" }}
+        showValue={false}
+        highlightOnFocus
+        onChange={onChange}
       />
-    </label>
+    </div>
   );
 }
 
@@ -448,13 +449,13 @@ function Content() {
     await updateRegion(nextRegion);
   };
 
-  const serviceActive = state?.service_active ?? false;
   const controlReady = state?.service_control_ready ?? false;
   const bundleReady = state?.daemon_bundle_ready ?? false;
   const daemonInstalled = state?.daemon_installed ?? false;
   const connected = state?.connected ?? false;
   const serviceStatus = state?.service_status;
-  const showInstalledUI = daemonInstalled;
+  const serviceActive = serviceStatus?.active_state === "active" || state?.service_active === true;
+  const showInstalledUI = daemonInstalled || serviceActive;
   const statusLabel = loading
     ? "Loading"
     : connected
@@ -648,9 +649,9 @@ function Content() {
               <SliderRow
                 label="Sensitivity"
                 value={config.motion.sensitivity}
-                min={0.1}
-                max={4}
-                step={0.01}
+                min={1}
+                max={200}
+                step={1}
                 format={(value) => value.toFixed(2)}
                 onChange={(value) => void updateMotion({ ...config.motion, sensitivity: value })}
               />
@@ -662,6 +663,15 @@ function Content() {
                 step={0.01}
                 format={(value) => value.toFixed(2)}
                 onChange={(value) => void updateMotion({ ...config.motion, accel_strength: value })}
+              />
+              <SliderRow
+                label="Acceleration exponent"
+                value={config.motion.accel_exponent}
+                min={0.5}
+                max={3}
+                step={0.01}
+                format={(value) => value.toFixed(2)}
+                onChange={(value) => void updateMotion({ ...config.motion, accel_exponent: value })}
               />
               <SliderRow
                 label="Smoothing"
@@ -694,6 +704,15 @@ function Content() {
                 step={0.01}
                 format={(value) => value.toFixed(2)}
                 onChange={(value) => void updateInertia({ ...config.inertia, friction: value })}
+              />
+              <SliderRow
+                label="Cutoff"
+                value={config.inertia.cutoff}
+                min={0}
+                max={0.1}
+                step={0.001}
+                format={(value) => value.toFixed(3)}
+                onChange={(value) => void updateInertia({ ...config.inertia, cutoff: value })}
               />
             </SectionCard>
           </PanelSectionRow>
