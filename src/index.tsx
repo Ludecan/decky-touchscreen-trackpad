@@ -1,6 +1,6 @@
-import { ButtonItem, PanelSection, PanelSectionRow, staticClasses } from "@decky/ui";
+import { ButtonItem, ModalRoot, PanelSection, PanelSectionRow, staticClasses, TextField } from "@decky/ui";
 import { callable, definePlugin, toaster } from "@decky/api";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FaWaveSquare } from "react-icons/fa";
 
 type RegionConfig = {
@@ -50,8 +50,8 @@ type PartialDaemonConfig = Partial<DaemonConfig>;
 
 const getState = callable<[], DaemonState>("get_state");
 const setConfig = callable<[patch: PartialDaemonConfig], DaemonState>("set_config");
-const installDaemon = callable<[], DaemonState>("install_daemon");
-const uninstallDaemon = callable<[], DaemonState>("uninstall_daemon");
+const installDaemon = callable<[authPassword: string], DaemonState>("install_daemon");
+const uninstallDaemon = callable<[authPassword: string], DaemonState>("uninstall_daemon");
 const startDaemon = callable<[], DaemonState>("start_daemon");
 const stopDaemon = callable<[], DaemonState>("stop_daemon");
 const restartDaemon = callable<[], DaemonState>("restart_daemon");
@@ -70,6 +70,62 @@ const defaultConfig: DaemonConfig = {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function formatError(error: unknown) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  if (typeof error === "string" && error.trim()) {
+    return error;
+  }
+
+  if (error && typeof error === "object") {
+    const candidate = error as Record<string, unknown>;
+    if (typeof candidate.message === "string" && candidate.message.trim()) {
+      return candidate.message;
+    }
+
+    try {
+      return JSON.stringify(candidate, null, 2);
+    } catch {
+      return String(error);
+    }
+  }
+
+  return String(error);
+}
+
+type InlineError = {
+  title: string;
+  call: string;
+  message: string;
+  raw: string;
+};
+
+function formatRawError(error: unknown) {
+  if (error instanceof Error) {
+    return JSON.stringify(
+      {
+        name: error.name,
+        message: error.message,
+        stack: error.stack,
+      },
+      null,
+      2,
+    );
+  }
+
+  if (typeof error === "string") {
+    return error;
+  }
+
+  try {
+    return JSON.stringify(error, null, 2);
+  } catch {
+    return String(error);
+  }
 }
 
 function normalizeConfig(config: Partial<DaemonConfig> | null | undefined): DaemonConfig {
@@ -119,6 +175,12 @@ function Badge({ active, label }: { active: boolean; label: string }) {
         fontWeight: 700,
         letterSpacing: "0.04em",
         textTransform: "uppercase",
+        minWidth: 0,
+        maxWidth: "12rem",
+        overflow: "hidden",
+        whiteSpace: "nowrap",
+        textOverflow: "ellipsis",
+        flex: "0 1 auto",
         color: active ? "#0f1f12" : "#d4d7e0",
         background: active ? "#84f59f" : "#3b4152",
       }}
@@ -201,6 +263,43 @@ function Content() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [installing, setInstalling] = useState(false);
+  const [inlineError, setInlineError] = useState<InlineError | null>(null);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authPassword, setAuthPassword] = useState("");
+  const [authMode, setAuthMode] = useState<"install" | "uninstall" | null>(null);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const authPasswordRef = useRef(authPassword);
+  const authBusyRef = useRef(authBusy);
+  authPasswordRef.current = authPassword;
+  authBusyRef.current = authBusy;
+
+  // Intercept Enter in capture phase so ModalRoot doesn't close the dialog first.
+  useEffect(() => {
+    if (!authModalOpen) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Enter" && !authBusyRef.current) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        setAuthBusy(true);
+        setAuthError(null);
+        runInstall(authPasswordRef.current)
+          .then((success) => { if (success) closeAuthorizationModal(); })
+          .catch((err: unknown) => { setAuthError(formatError(err)); })
+          .finally(() => { setAuthBusy(false); });
+      }
+    };
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authModalOpen]);
+
+  const recordInlineError = (title: string, call: string, error: unknown) => {
+    const message = formatError(error);
+    const raw = formatRawError(error);
+    setInlineError({ title, call, message, raw });
+    return message;
+  };
 
   const refresh = async () => {
     setLoading(true);
@@ -209,7 +308,7 @@ function Content() {
       setState(next);
       setLocalConfig(normalizeConfig(next.config));
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = recordInlineError("Unable to reach daemon", "getState()", error);
       toaster.toast({ title: "Unable to reach daemon", body: message });
     } finally {
       setLoading(false);
@@ -229,8 +328,9 @@ function Content() {
       if (next.config) {
         setLocalConfig(normalizeConfig(next.config));
       }
+      setInlineError(null);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = recordInlineError("Failed to update config", "setConfig(patch)", error);
       toaster.toast({ title: "Failed to update config", body: message });
       await refresh();
     } finally {
@@ -245,33 +345,73 @@ function Content() {
       if (next.config) {
         setLocalConfig(normalizeConfig(next.config));
       }
+      setInlineError(null);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = recordInlineError("Service action failed", "runServiceAction(action)", error);
       toaster.toast({ title: "Service action failed", body: message });
       await refresh();
     }
   };
 
-  const runInstall = async () => {
+  const runInstall = async (password: string) => {
     setInstalling(true);
     try {
-      const next = state?.daemon_installed ? await uninstallDaemon() : await installDaemon();
+      const next = state?.daemon_installed
+        ? await uninstallDaemon(password)
+        : await installDaemon(password);
       setState(next);
       if (next.config) {
         setLocalConfig(normalizeConfig(next.config));
       }
+      setInlineError(null);
       toaster.toast({
         title: state?.daemon_installed ? "Daemon uninstalled" : "Daemon installed",
         body: state?.daemon_installed
           ? "The user service, permissions, and bundled daemon files were removed."
           : "The user service and permissions were installed.",
       });
+      return true;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      toaster.toast({ title: state?.daemon_installed ? "Daemon uninstall failed" : "Daemon install failed", body: message });
+      const title = state?.daemon_installed ? "Daemon uninstall failed" : "Daemon install failed";
+      const call = state?.daemon_installed ? "uninstallDaemon()" : "installDaemon()";
+      const message = recordInlineError(title, call, error);
+      toaster.toast({
+        title,
+        body: message || "See ~/.local/state/touchscreen-trackpad/plugin.log for details.",
+      });
       await refresh();
+      return false;
     } finally {
       setInstalling(false);
+    }
+  };
+
+  const openAuthorizationModal = (mode: "install" | "uninstall") => {
+    setAuthMode(mode);
+    setAuthPassword("");
+    setAuthError(null);
+    setAuthModalOpen(true);
+  };
+
+  const closeAuthorizationModal = () => {
+    setAuthModalOpen(false);
+    setAuthPassword("");
+    setAuthMode(null);
+    setAuthError(null);
+  };
+
+  const submitAuthorization = async () => {
+    setAuthBusy(true);
+    setAuthError(null);
+    try {
+      const success = await runInstall(authPassword);
+      if (success) {
+        closeAuthorizationModal();
+      }
+    } catch (error) {
+      setAuthError(formatError(error));
+    } finally {
+      setAuthBusy(false);
     }
   };
 
@@ -314,13 +454,14 @@ function Content() {
   const daemonInstalled = state?.daemon_installed ?? false;
   const connected = state?.connected ?? false;
   const serviceStatus = state?.service_status;
+  const showInstalledUI = daemonInstalled;
   const statusLabel = loading
     ? "Loading"
     : connected
       ? serviceActive
-        ? "Daemon connected"
+        ? "Connected"
         : "Socket ready"
-      : "Disconnected";
+      : "Offline";
 
   return (
     <div
@@ -346,6 +487,67 @@ function Content() {
       >
         <section
           style={{
+            padding: "1rem",
+            borderRadius: 18,
+            background: "rgba(20, 25, 35, 0.96)",
+            border: `1px solid ${inlineError ? "rgba(255, 127, 145, 0.3)" : "rgba(137, 145, 175, 0.18)"}`,
+            boxShadow: "0 18px 45px rgba(0, 0, 0, 0.26)",
+            color: "#ffe7eb",
+          }}
+        >
+          <div style={{ fontSize: "0.95rem", fontWeight: 800, marginBottom: "0.4rem" }}>Debug</div>
+          <div style={{ display: "grid", gap: "0.4rem", fontSize: "0.82rem", color: "#d4d7e0" }}>
+            <div>
+              Install state: <strong style={{ color: "#f4f6fb" }}>{daemonInstalled ? "installed" : "not installed"}</strong>
+            </div>
+            <div>
+              Bundle: <strong style={{ color: "#f4f6fb" }}>{bundleReady ? "ready" : "missing"}</strong>
+            </div>
+            <div>
+              Control: <strong style={{ color: "#f4f6fb" }}>{controlReady ? "ready" : "not ready"}</strong>
+            </div>
+            <div>
+              Socket: <strong style={{ color: "#f4f6fb" }}>{state?.socket_path ?? "unknown"}</strong>
+            </div>
+            <div>
+              Plugin log: <strong style={{ color: "#f4f6fb" }}>~/.local/state/touchscreen-trackpad/plugin.log</strong>
+            </div>
+          </div>
+
+          <div style={{ marginTop: "0.9rem", paddingTop: "0.8rem", borderTop: "1px solid rgba(255, 255, 255, 0.12)" }}>
+            <div style={{ fontSize: "0.86rem", fontWeight: 700, marginBottom: "0.35rem", color: inlineError ? "#ffbcc6" : "#aeb5c7" }}>
+              {inlineError ? inlineError.title : "No error captured"}
+            </div>
+            <div style={{ fontSize: "0.78rem", fontWeight: 700, marginBottom: "0.45rem", color: inlineError ? "#ffbcc6" : "#aeb5c7" }}>
+              {inlineError ? `Failed call: ${inlineError.call}` : "Waiting for the next failure to capture details."}
+            </div>
+            <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.5, fontSize: "0.86rem", color: inlineError ? "#ffd8de" : "#cfd5e2" }}>
+              {inlineError ? inlineError.message : "This panel stays visible even when the daemon is not installed, so you can confirm bundle state and the current socket path before testing install."}
+            </div>
+            {inlineError ? (
+              <div style={{ marginTop: "0.8rem", paddingTop: "0.75rem", borderTop: "1px solid rgba(255, 255, 255, 0.12)" }}>
+                <div style={{ fontSize: "0.8rem", fontWeight: 700, marginBottom: "0.35rem", color: "#ffbcc6" }}>Raw exception</div>
+                <pre
+                  style={{
+                    margin: 0,
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                    maxHeight: 240,
+                    overflow: "auto",
+                    fontSize: "0.78rem",
+                    lineHeight: 1.45,
+                    color: "#ffeef1",
+                  }}
+                >
+                  {inlineError.raw}
+                </pre>
+              </div>
+            ) : null}
+          </div>
+        </section>
+
+        <section
+          style={{
             padding: "1.1rem 1rem",
             borderRadius: 20,
             background: "linear-gradient(135deg, rgba(25, 33, 53, 0.98), rgba(12, 17, 29, 0.98))",
@@ -354,7 +556,7 @@ function Content() {
         >
           <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", alignItems: "stretch" }}>
             <div style={{ width: "100%", minWidth: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.35rem" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.35rem", flexWrap: "wrap", minWidth: 0 }}>
                 <div className={staticClasses.Title}>Touchscreen Trackpad</div>
                 <Badge active={connected} label={statusLabel} />
               </div>
@@ -363,9 +565,15 @@ function Content() {
               </div>
             </div>
             <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", justifyContent: "flex-start", width: "100%" }}>
-              <ButtonItem layout="below" onClick={() => void refresh()}>
-                Refresh
-              </ButtonItem>
+              {showInstalledUI ? (
+                <ButtonItem layout="below" onClick={() => void refresh()}>
+                  Refresh
+                </ButtonItem>
+              ) : (
+                <ButtonItem layout="below" onClick={() => openAuthorizationModal("install")} disabled={installing}>
+                  Install daemon
+                </ButtonItem>
+              )}
             </div>
           </div>
           <div style={{ marginTop: "0.75rem", fontSize: "0.82rem", color: "#8f98ad" }}>
@@ -379,6 +587,7 @@ function Content() {
           </div>
         </section>
 
+        {showInstalledUI ? (
         <PanelSection title="Core">
           <PanelSectionRow>
             <SectionCard
@@ -392,7 +601,7 @@ function Content() {
                   <Badge active={controlReady} label={controlReady ? "Control ready" : "No service control"} />
                 </div>
                 <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-                  <ButtonItem layout="below" onClick={() => void runInstall()} disabled={installing || !bundleReady}>
+                  <ButtonItem layout="below" onClick={() => openAuthorizationModal(daemonInstalled ? "uninstall" : "install")} disabled={installing}>
                     {daemonInstalled ? "Uninstall daemon" : "Install daemon"}
                   </ButtonItem>
                   <ButtonItem layout="below" onClick={() => void runServiceAction(startDaemon)} disabled={serviceActive || !controlReady}>
@@ -409,7 +618,7 @@ function Content() {
                   </ButtonItem>
                 </div>
                 <div style={{ color: "#aeb5c7", fontSize: "0.82rem" }}>
-                  The installer writes a user service, a touchscreen symlink rule, and a uinput permission rule. If the button is disabled, the packaged daemon binary is missing from the plugin bundle.
+                  The installer writes a user service, a touchscreen symlink rule, and a uinput permission rule. If the packaged daemon files are missing, the click will fail with a detailed error instead of being blocked here.
                 </div>
               </div>
             </SectionCard>
@@ -428,6 +637,7 @@ function Content() {
                 />
                 <span style={{ color: "#e8ebf5", fontWeight: 600 }}>
                   {config.global.enabled ? "Enabled" : "Disabled"}
+
                 </span>
               </label>
             </SectionCard>
@@ -529,6 +739,56 @@ function Content() {
             </SectionCard>
           </PanelSectionRow>
         </PanelSection>
+        ) : null}
+
+        {authModalOpen ? (
+          <ModalRoot
+            closeModal={closeAuthorizationModal}
+            onCancel={closeAuthorizationModal}
+            onOK={() => void submitAuthorization()}
+            onEscKeypress={closeAuthorizationModal}
+            bDisableBackgroundDismiss
+          >
+            <div style={{ display: "grid", gap: "0.7rem", padding: "0.25rem 0 0.1rem", width: "min(92vw, 24rem)", maxWidth: "100%", boxSizing: "border-box" }}>
+              <div style={{ fontSize: "1rem", fontWeight: 800, color: "#f4f6fb" }}>
+                {authMode === "uninstall" ? "Authorize uninstall" : "Authorize install"}
+              </div>
+              <div style={{ fontSize: "0.88rem", color: "#aeb5c7", lineHeight: 1.45 }}>
+                {authMode === "uninstall"
+                  ? "Enter your sudo password to remove the udev rule and uninstall the daemon."
+                  : "Enter your sudo password to install the udev rule and finish the daemon install."}
+              </div>
+              <TextField
+                label="sudo password"
+                value={authPassword}
+                bIsPassword
+                focusOnMount
+                onChange={(event) => setAuthPassword(event.currentTarget.value)}
+                style={{
+                  width: "100%",
+                  boxSizing: "border-box",
+                  borderRadius: 12,
+                  border: "1px solid rgba(137, 145, 175, 0.2)",
+                  background: "rgba(8, 12, 20, 0.9)",
+                  color: "#f4f6fb",
+                  padding: "0.8rem 0.9rem",
+                  fontSize: "0.95rem",
+                }}
+              />
+              <div style={{ fontSize: "0.8rem", color: authError ? "#ffbcc6" : "#aeb5c7", whiteSpace: "pre-wrap" }}>
+                {authError ?? "This dialog is used to trigger the Steam keyboard and keep authorization separate from the main UI."}
+              </div>
+              <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end", flexWrap: "wrap" }}>
+                <ButtonItem layout="below" onClick={closeAuthorizationModal} disabled={authBusy}>
+                  Cancel
+                </ButtonItem>
+                <ButtonItem layout="below" onClick={() => void submitAuthorization()} disabled={authBusy || authPassword.length === 0}>
+                  {authBusy ? "Working..." : authMode === "uninstall" ? "Uninstall" : "Install"}
+                </ButtonItem>
+              </div>
+            </div>
+          </ModalRoot>
+        ) : null}
       </div>
     </div>
   );

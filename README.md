@@ -40,6 +40,10 @@ make deploy
 make builddeploy
 ```
 
+## Desktop Preview
+
+You can preview the UI without entering Game Mode by opening [preview.html](/home/deck/workspace/decky-touchscreen-trackpad/preview.html) in a desktop browser. It shows the not-installed state by default and lets you toggle into the installed state so you can check the header, badges, and control layout.
+
 ## Deploy
 
 The repo assumes the plugin directory itself is mounted into the distrobox container at `/home/deck/homebrew/plugins/Touchscreen-Trackpad`.
@@ -52,13 +56,17 @@ The repo assumes the plugin directory itself is mounted into the distrobox conta
 6. Restart Decky on the host if it does not pick up the change immediately.
 
 The build step now also expects a packaged daemon binary in `assets/daemon/touchscreen-trackpad`, so the install button can lay down the user service and permissions without asking the user to build the Rust repo on-device.
-It also expects `assets/daemon/install-daemon.sh` and `assets/daemon/uninstall-daemon.sh`, so the UI can toggle the button between install and uninstall without reimplementing the daemon repo logic.
+It also expects `assets/daemon/install-daemon.sh` and `assets/daemon/uninstall-daemon.sh`, which are copied from the daemon repo at package time so the UI can toggle the button between install and uninstall without reimplementing the daemon repo logic.
+
+Install and uninstall failures now include the command, exit code, stdout, and stderr in the Decky toast so permission problems are easier to diagnose.
+
+Plugin errors are also appended to `~/.local/state/touchscreen-trackpad/plugin.log` by default. Set `TOUCHSCREEN_TRACKPAD_PLUGIN_LOG_FILE` if you want to move it.
 
 The `Makefile` deploy target uses `rsync` directly into `/home/deck/homebrew/plugins/Touchscreen-Trackpad` through the mounted host path, which avoids SSH entirely for local development.
 
 ## Socket defaults
 
-The backend checks `TOUCHSCREEN_TRACKPAD_SOCKET` first, then falls back to `/run/touchscreen-trackpad.sock` and `/tmp/touchscreen-trackpad.sock`.
+The backend checks `TOUCHSCREEN_TRACKPAD_SOCKET` first, then falls back to `/tmp/touchscreen-trackpad.sock` and `/run/touchscreen-trackpad.sock`.
 
 # Container creation
 distrobox rm dev
@@ -73,5 +81,7 @@ sudo apt install -y nodejs
 npm install -g npm@11.14.1
 
 
-
 sudo npm install -g pnpm
+
+
+sudo apt install mesa-utils zstd

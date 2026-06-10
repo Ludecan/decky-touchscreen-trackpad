@@ -1,0 +1,30 @@
+[global]
+enabled = true
+
+[region]
+# Active trackpad area as fractions of the full screen (0.0 = left/top, 1.0 = right/bottom).
+# Default: right half of the screen.
+x_min = 0.5
+x_max = 1.0
+y_min = 0.0
+y_max = 1.0
+
+[motion]
+# Base movement multiplier.
+sensitivity = 100
+# How strongly speed amplifies movement (0.0 = off).
+accel_strength = 0.4
+# Power-law exponent for the acceleration curve.
+accel_exponent = 1.8
+# Exponential moving-average smoothing factor (0.0 = full smoothing, 1.0 = off).
+smoothing = 0.1
+# Minimum delta magnitude (in screen fraction) to register movement.
+deadzone = 0.0
+
+[inertia]
+# Whether trackball/inertia effect is active after finger lift.
+enabled = true
+# Velocity retention per tick (0.0 = instant stop, 1.0 = no friction).
+friction = 0.92
+# Stop inertia when speed drops below this value.
+cutoff = 0.01

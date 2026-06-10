@@ -10,9 +10,11 @@ DAEMON_REPO ?= ../touchscreen-trackpad
 DAEMON_BINARY ?= $(DAEMON_REPO)/target/release/touchscreen-trackpad
 DAEMON_INSTALLER ?= $(DAEMON_REPO)/scripts/install-daemon.sh
 DAEMON_UNINSTALLER ?= $(DAEMON_REPO)/scripts/uninstall-daemon.sh
+DAEMON_CONFIG ?= $(DAEMON_REPO)/config.toml
 DAEMON_BUNDLE ?= assets/daemon/touchscreen-trackpad
 INSTALLER_BUNDLE ?= assets/daemon/install-daemon.sh
 UNINSTALLER_BUNDLE ?= assets/daemon/uninstall-daemon.sh
+CONFIG_BUNDLE ?= assets/config.toml
 
 PLUGIN_SLUG := $(shell printf '%s' '$(PLUGIN_NAME)' | sed 's| |-|g')
 DEPLOY_DIR := $(DEPLOY_ROOT)
@@ -52,6 +54,10 @@ package-daemon:
 		echo 'Daemon uninstaller not found at $(DAEMON_UNINSTALLER).'; \
 		exit 1; \
 	fi
+	@if [[ ! -f '$(DAEMON_CONFIG)' ]]; then \
+		echo 'Daemon config not found at $(DAEMON_CONFIG).'; \
+		exit 1; \
+	fi
 	@mkdir -p '$(dir $(DAEMON_BUNDLE))'
 	@cp '$(DAEMON_BINARY)' '$(DAEMON_BUNDLE)'
 	@chmod 755 '$(DAEMON_BUNDLE)'
@@ -59,6 +65,7 @@ package-daemon:
 	@chmod 755 '$(INSTALLER_BUNDLE)'
 	@cp '$(DAEMON_UNINSTALLER)' '$(UNINSTALLER_BUNDLE)'
 	@chmod 755 '$(UNINSTALLER_BUNDLE)'
+	@cp '$(DAEMON_CONFIG)' '$(CONFIG_BUNDLE)'
 
 deploy:
 	@if [[ ! -d '$(DEPLOY_ROOT)' ]]; then \

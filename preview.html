@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Touchscreen Trackpad UI Preview</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #060a12;
+        --bg-2: #101a2f;
+        --panel: rgba(18, 24, 38, 0.92);
+        --panel-2: rgba(24, 32, 50, 0.98);
+        --border: rgba(140, 151, 182, 0.18);
+        --border-strong: rgba(140, 151, 182, 0.26);
+        --text: #f2f5fb;
+        --muted: #a8b1c7;
+        --soft: #8f98ad;
+        --accent: #84f59f;
+        --accent-text: #0f1f12;
+        --warn: #f7c66f;
+        --danger: #ff7f91;
+        --shadow: 0 18px 45px rgba(0, 0, 0, 0.28);
+        --radius: 20px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background:
+          radial-gradient(circle at top left, rgba(103, 148, 255, 0.18), transparent 30%),
+          radial-gradient(circle at 80% 15%, rgba(132, 245, 159, 0.12), transparent 24%),
+          linear-gradient(160deg, var(--bg), var(--bg-2));
+        color: var(--text);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background-image: linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+        background-size: 32px 32px;
+        mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.65), transparent 80%);
+      }
+
+      .page {
+        position: relative;
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+
+      .hero {
+        padding: 18px;
+        border-radius: 24px;
+        background: linear-gradient(135deg, rgba(27, 36, 58, 0.98), rgba(12, 18, 30, 0.98));
+        border: 1px solid var(--border);
+        box-shadow: var(--shadow);
+      }
+
+      .hero-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+
+      .title-wrap {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        min-width: 0;
+        flex-wrap: wrap;
+      }
+
+      .app-title {
+        font-size: clamp(1.45rem, 3vw, 2.1rem);
+        line-height: 1.05;
+        font-weight: 800;
+        letter-spacing: -0.04em;
+      }
+
+      .subtitle {
+        margin-top: 8px;
+        max-width: 760px;
+        color: var(--muted);
+        font-size: 0.96rem;
+        line-height: 1.5;
+      }
+
+      .pills {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        border-radius: 999px;
+        border: 1px solid var(--border-strong);
+        background: rgba(8, 12, 20, 0.6);
+        color: var(--text);
+        font-size: 0.78rem;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        white-space: nowrap;
+        max-width: 220px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .pill .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: currentColor;
+        box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.04);
+        flex: 0 0 auto;
+      }
+
+      .pill[data-active="true"] {
+        background: rgba(132, 245, 159, 0.95);
+        color: #0f1f12;
+        border-color: transparent;
+      }
+
+      .pill[data-active="false"] {
+        color: #d4d7e0;
+      }
+
+      .toolbar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-top: 16px;
+      }
+
+      .button {
+        appearance: none;
+        border: 1px solid var(--border-strong);
+        background: rgba(19, 26, 41, 0.96);
+        color: var(--text);
+        border-radius: 12px;
+        padding: 12px 16px;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+        transition: transform 140ms ease, border-color 140ms ease, background 140ms ease, opacity 140ms ease;
+      }
+
+      .button:hover {
+        transform: translateY(-1px);
+        border-color: rgba(132, 245, 159, 0.45);
+      }
+
+      .button.primary {
+        background: linear-gradient(135deg, #84f59f, #66d9ff);
+        border-color: transparent;
+        color: #09120c;
+      }
+
+      .button:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+        transform: none;
+      }
+
+      .status-line {
+        margin-top: 14px;
+        display: grid;
+        gap: 8px;
+        color: var(--soft);
+        font-size: 0.84rem;
+      }
+
+      .status-line strong {
+        color: var(--text);
+      }
+
+      .grid {
+        margin-top: 16px;
+        display: grid;
+        grid-template-columns: 1.2fr 0.8fr;
+        gap: 16px;
+      }
+
+      .card,
+      .section {
+        border-radius: 18px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        box-shadow: var(--shadow);
+      }
+
+      .section {
+        padding: 16px;
+      }
+
+      .section-title {
+        font-size: 1.02rem;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+      }
+
+      .section-subtitle {
+        margin-top: 5px;
+        color: var(--muted);
+        font-size: 0.88rem;
+        line-height: 1.45;
+      }
+
+      .badge-row {
+        margin-top: 14px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 9px 13px;
+        border-radius: 999px;
+        font-size: 0.78rem;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        border: 1px solid var(--border-strong);
+        background: rgba(9, 13, 22, 0.72);
+        white-space: nowrap;
+      }
+
+      .badge .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: currentColor;
+      }
+
+      .badge.green {
+        background: rgba(132, 245, 159, 0.95);
+        color: #0f1f12;
+        border-color: transparent;
+      }
+
+      .badge.gray {
+        color: #d4d7e0;
+      }
+
+      .badge.blue {
+        color: #c8e2ff;
+      }
+
+      .status-card {
+        padding: 16px;
+      }
+
+      .stack {
+        display: grid;
+        gap: 14px;
+      }
+
+      .slider {
+        display: grid;
+        gap: 7px;
+      }
+
+      .slider-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .slider-label {
+        color: #e9edf7;
+        font-size: 0.9rem;
+        font-weight: 700;
+      }
+
+      .slider-value {
+        color: var(--muted);
+        font-size: 0.84rem;
+      }
+
+      input[type="range"] {
+        width: 100%;
+        accent-color: #84f59f;
+      }
+
+      .install-banner {
+        margin-top: 12px;
+        padding: 14px;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        color: var(--muted);
+        line-height: 1.5;
+        font-size: 0.84rem;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
+      .side-note {
+        color: var(--muted);
+        font-size: 0.83rem;
+        line-height: 1.45;
+      }
+
+      .preview-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 14px;
+        border-radius: 14px;
+        border: 1px solid var(--border-strong);
+        background: rgba(8, 12, 20, 0.62);
+        color: var(--text);
+        cursor: pointer;
+        user-select: none;
+      }
+
+      .switch {
+        width: 42px;
+        height: 24px;
+        border-radius: 999px;
+        position: relative;
+        background: rgba(255, 255, 255, 0.14);
+        flex: 0 0 auto;
+      }
+
+      .switch::after {
+        content: "";
+        position: absolute;
+        top: 3px;
+        left: 3px;
+        width: 18px;
+        height: 18px;
+        border-radius: 999px;
+        background: white;
+        transition: transform 150ms ease;
+      }
+
+      body[data-installed="true"] .switch::after {
+        transform: translateX(18px);
+      }
+
+      body[data-installed="true"] .switch {
+        background: rgba(132, 245, 159, 0.95);
+      }
+
+      @media (max-width: 900px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body data-installed="false">
+    <main class="page">
+      <section class="hero">
+        <div class="hero-top">
+          <div class="title-wrap">
+            <div>
+              <div class="app-title">Touchscreen Trackpad</div>
+              <div class="subtitle">Standalone desktop preview of the Decky plugin UI. Use the toggle to switch between the not-installed and installed states without entering Game Mode.</div>
+            </div>
+          </div>
+          <label class="preview-toggle" id="previewToggle">
+            <span class="switch" aria-hidden="true"></span>
+            <span><strong>Preview state:</strong> <span id="previewStateLabel">Not installed</span></span>
+          </label>
+        </div>
+
+        <div class="toolbar">
+          <span class="pill" data-active="false"><span class="dot"></span><span id="statusPill">Offline</span></span>
+          <button class="button primary" id="installButton">Install daemon</button>
+          <button class="button hidden" id="refreshButton">Refresh</button>
+        </div>
+
+        <div class="status-line">
+          <div>Socket: <strong>/tmp/touchscreen-trackpad.sock</strong></div>
+          <div>Service: <strong id="serviceLine">unknown</strong></div>
+          <div>Bundle: <strong>ready</strong> • Install: <strong id="installLine">not installed</strong></div>
+        </div>
+      </section>
+
+      <div class="grid">
+        <section class="section card" id="corePanel">
+          <div class="section-title">Daemon control</div>
+          <div class="section-subtitle">Install the daemon once, then start or stop the service and tune runtime config from Game Mode.</div>
+
+          <div class="badge-row">
+            <span class="badge gray"><span class="dot"></span><span id="runBadge">Stopped</span></span>
+            <span class="badge gray"><span class="dot"></span><span id="installedBadge">Not installed</span></span>
+            <span class="badge blue"><span class="dot"></span><span id="controlBadge">No service control</span></span>
+          </div>
+
+          <div class="toolbar" style="margin-top: 16px;">
+            <button class="button primary" id="secondaryInstallButton">Install daemon</button>
+            <button class="button" id="startButton">Start daemon</button>
+            <button class="button" id="stopButton">Stop daemon</button>
+            <button class="button" id="restartButton">Restart daemon</button>
+            <button class="button" id="recheckButton">Recheck</button>
+          </div>
+
+          <div class="install-banner" id="installHint">The installer writes a user service, a touchscreen symlink rule, and a uinput permission rule. If the button is disabled, the packaged daemon binary is missing from the plugin bundle.</div>
+        </section>
+
+        <section class="stack">
+          <section class="section card">
+            <div class="section-title">Runtime config</div>
+            <div class="section-subtitle">This toggles the daemon's runtime config, while the buttons above manage the systemd unit.</div>
+            <div class="toolbar" style="margin-top: 14px;">
+              <label class="badge gray" style="text-transform:none; letter-spacing:0; font-size:0.88rem; font-weight:700;">
+                <input type="checkbox" checked style="margin-right:10px; accent-color:#84f59f;" />
+                Enabled
+              </label>
+            </div>
+          </section>
+
+          <section class="section card">
+            <div class="section-title">Motion</div>
+            <div class="section-subtitle">Live trackpad tuning parameters.</div>
+            <div class="stack" style="margin-top: 14px;">
+              <div class="slider"><div class="slider-head"><span class="slider-label">Sensitivity</span><span class="slider-value">1.00</span></div><input type="range" min="0.1" max="4" step="0.01" value="1" /></div>
+              <div class="slider"><div class="slider-head"><span class="slider-label">Acceleration strength</span><span class="slider-value">0.40</span></div><input type="range" min="0" max="2" step="0.01" value="0.4" /></div>
+              <div class="slider"><div class="slider-head"><span class="slider-label">Smoothing</span><span class="slider-value">0.10</span></div><input type="range" min="0" max="1" step="0.01" value="0.1" /></div>
+              <div class="slider"><div class="slider-head"><span class="slider-label">Deadzone</span><span class="slider-value">0.000</span></div><input type="range" min="0" max="0.5" step="0.001" value="0" /></div>
+            </div>
+          </section>
+
+          <section class="section card">
+            <div class="section-title">Inertia</div>
+            <div class="section-subtitle">Trackball-style glide after finger lift.</div>
+            <div class="slider" style="margin-top: 14px;"><div class="slider-head"><span class="slider-label">Friction</span><span class="slider-value">0.92</span></div><input type="range" min="0" max="1" step="0.01" value="0.92" /></div>
+          </section>
+
+          <section class="section card">
+            <div class="section-title">Active region</div>
+            <div class="section-subtitle">Normalized coordinates in the touchscreen space.</div>
+            <div class="stack" style="margin-top: 14px;">
+              <div class="slider"><div class="slider-head"><span class="slider-label">Left edge</span><span class="slider-value">50%</span></div><input type="range" min="0" max="1" step="0.01" value="0.5" /></div>
+              <div class="slider"><div class="slider-head"><span class="slider-label">Right edge</span><span class="slider-value">100%</span></div><input type="range" min="0" max="1" step="0.01" value="1" /></div>
+              <div class="slider"><div class="slider-head"><span class="slider-label">Top edge</span><span class="slider-value">0%</span></div><input type="range" min="0" max="1" step="0.01" value="0" /></div>
+              <div class="slider"><div class="slider-head"><span class="slider-label">Bottom edge</span><span class="slider-value">100%</span></div><input type="range" min="0" max="1" step="0.01" value="1" /></div>
+            </div>
+          </section>
+        </section>
+      </div>
+    </main>
+
+    <script>
+      const body = document.body;
+      const installButton = document.getElementById("installButton");
+      const secondaryInstallButton = document.getElementById("secondaryInstallButton");
+      const refreshButton = document.getElementById("refreshButton");
+      const corePanel = document.getElementById("corePanel");
+      const previewToggle = document.getElementById("previewToggle");
+      const previewStateLabel = document.getElementById("previewStateLabel");
+      const statusPill = document.getElementById("statusPill");
+      const serviceLine = document.getElementById("serviceLine");
+      const installLine = document.getElementById("installLine");
+      const runBadge = document.getElementById("runBadge");
+      const installedBadge = document.getElementById("installedBadge");
+      const controlBadge = document.getElementById("controlBadge");
+      const installHint = document.getElementById("installHint");
+
+      function setInstalled(installed) {
+        body.dataset.installed = String(installed);
+        previewStateLabel.textContent = installed ? "Installed" : "Not installed";
+        statusPill.textContent = installed ? "Connected" : "Offline";
+        serviceLine.textContent = installed ? "running / active / enabled" : "unknown / unknown / unknown";
+        installLine.textContent = installed ? "installed" : "not installed";
+        runBadge.textContent = installed ? "Running" : "Stopped";
+        installedBadge.textContent = installed ? "Installed" : "Not installed";
+        controlBadge.textContent = installed ? "Control ready" : "No service control";
+        installButton.textContent = installed ? "Uninstall daemon" : "Install daemon";
+        secondaryInstallButton.textContent = installed ? "Uninstall daemon" : "Install daemon";
+        refreshButton.classList.toggle("hidden", !installed);
+        corePanel.classList.toggle("hidden", !installed);
+        installHint.textContent = installed
+          ? "The daemon is shown as installed here so you can preview the full control panel, badges, and runtime tuning sections."
+          : "The install path stays visible here so you can verify the compact header state and the single install button used before the daemon exists.";
+      }
+
+      installButton.addEventListener("click", () => setInstalled(body.dataset.installed !== "true"));
+      secondaryInstallButton.addEventListener("click", () => setInstalled(body.dataset.installed !== "true"));
+      previewToggle.addEventListener("click", () => setInstalled(body.dataset.installed !== "true"));
+      refreshButton.addEventListener("click", () => {
+        statusPill.textContent = body.dataset.installed === "true" ? "Connected" : "Offline";
+      });
+
+      setInstalled(false);
+    </script>
+  </body>
+</html>

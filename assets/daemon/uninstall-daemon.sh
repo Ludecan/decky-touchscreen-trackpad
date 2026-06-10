@@ -1,9 +1,10 @@
-#!/bin/sh
+#!/bin/bash
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 INSTALL_ROOT=${TOUCHSCREEN_TRACKPAD_INSTALL_ROOT:-$HOME/.local/share/touchscreen-trackpad}
 INSTALL_BINARY=$INSTALL_ROOT/touchscreen-trackpad
+INSTALL_CONFIG=$INSTALL_ROOT/config.toml
 USER_UNIT_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user
 USER_UNIT_PATH=$USER_UNIT_DIR/touchscreen-trackpad.service
 UDEV_RULE_PATH=/etc/udev/rules.d/99-touchscreen-trackpad.rules
@@ -20,14 +21,19 @@ systemctl --user daemon-reload
 
 rm -f "$USER_UNIT_PATH"
 rm -f "$INSTALL_BINARY"
+rm -f "$INSTALL_CONFIG"
 rm -rf "$INSTALL_ROOT"
 rm -f "$LOG_FILE"
 rmdir "$LOG_DIR" 2>/dev/null || true
 
 if command -v sudo >/dev/null 2>&1; then
   sudo rm -f "$UDEV_RULE_PATH"
-  sudo udevadm control --reload-rules
-  sudo udevadm trigger --subsystem-match=input
+  if command -v udevadm >/dev/null 2>&1; then
+    sudo udevadm control --reload-rules
+    sudo udevadm trigger --subsystem-match=input
+  else
+    echo "udevadm is not available here; the rule was removed, but the host udev rules were not reloaded automatically."
+  fi
 else
   echo "sudo is required to remove udev rules at $UDEV_RULE_PATH"
   echo "The user service and installed binary were removed, but the udev rule may remain."
@@ -36,4 +42,5 @@ fi
 printf 'Uninstalled %s\n' "$SERVICE_NAME"
 printf 'Removed unit: %s\n' "$USER_UNIT_PATH"
 printf 'Removed binary: %s\n' "$INSTALL_BINARY"
+printf 'Removed config: %s\n' "$INSTALL_CONFIG"
 printf 'Removed log: %s\n' "$LOG_FILE"
