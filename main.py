@@ -6,6 +6,7 @@ import stat
 import subprocess
 import shutil
 import tempfile
+import time
 import traceback
 from pathlib import Path
 from datetime import datetime, timezone
@@ -42,12 +43,21 @@ class Plugin:
         self.install_root = Path.home() / ".local/share/touchscreen-trackpad"
         self.install_binary = self.install_root / "touchscreen-trackpad"
         self.user_unit_path = Path.home() / ".config/systemd/user" / self.service_name
-        self.udev_rule_path = Path("/etc/udev/rules.d/99-touchscreen-trackpad.rules")
+        # Must sort after 60-input-id.rules (ID_INPUT_TOUCHSCREEN) but BEFORE
+        # 73-seat-late.rules, where udev queues the uaccess builtin that grants
+        # the active seat session an ACL on the device node. Rules numbered 99+
+        # are too late: the tag lands after the ACL logic already ran.
+        self.udev_rule_path = Path("/etc/udev/rules.d/72-touchscreen-trackpad.rules")
+        self.legacy_udev_rule_path = Path("/etc/udev/rules.d/99-touchscreen-trackpad.rules")
+        self.touchscreen_symlink = Path("/dev/input/touchscreen-trackpad")
         self.default_config = {
             "global": {"enabled": True},
+            "input": {"max_touch_frame_age_ms": 60},
             "region": {"x_min": 0.5, "x_max": 1.0, "y_min": 0.0, "y_max": 1.0},
-            "motion": {"sensitivity": 100, "accel_strength": 0.4, "accel_exponent": 1.8, "smoothing": 0.1, "deadzone": 0.0},
-            "inertia": {"enabled": True, "friction": 0.92, "cutoff": 0.01},
+            "motion": {"sensitivity": 4.1, "accel_strength": 0.6, "accel_exponent": 1.2, "smoothing": 0.15, "deadzone": 0.0002},
+            "inertia": {"enabled": True, "friction": 0.97, "cutoff": 0.01},
+            "tap": {"enabled": True, "max_duration_ms": 180, "max_movement": 0.02},
+            "output": {"mouse": True, "gamepad": False},
         }
 
     def _daemon_assets_dir(self):
@@ -110,7 +120,7 @@ class Plugin:
         return json.dumps(value)
 
     def _serialize_config(self, config):
-        sections = ["global", "region", "motion", "inertia"]
+        sections = ["global", "input", "region", "motion", "inertia", "tap", "output"]
         lines = []
 
         for section in sections:
@@ -122,6 +132,21 @@ class Plugin:
 
         return "\n".join(lines).rstrip() + "\n"
 
+    def _migrate_sensitivity_scale(self, config):
+        # Older plugin UIs wrote sensitivity on a 1-200 scale; the current
+        # scale is 0.1-50 with 1.0 = neutral. Only convert values that clearly
+        # belong to the old scale (above the new maximum) and persist once.
+        motion = config.get("motion") if isinstance(config, dict) else None
+        if not isinstance(motion, dict):
+            return False
+
+        sensitivity = motion.get("sensitivity")
+        if isinstance(sensitivity, (int, float)) and not isinstance(sensitivity, bool) and sensitivity > 50:
+            motion["sensitivity"] = round(sensitivity / 100.0, 4)
+            return True
+
+        return False
+
     def _read_config_file(self):
         for path in (self._config_file_path(), self._bundle_config_path()):
             if not path.exists():
@@ -131,7 +156,13 @@ class Plugin:
                 with path.open("rb") as handle:
                     loaded = tomllib.load(handle)
                 if isinstance(loaded, dict):
-                    return _deep_merge(self.default_config, loaded)
+                    merged = _deep_merge(self.default_config, loaded)
+                    if self._migrate_sensitivity_scale(merged):
+                        try:
+                            self._write_config_file(merged)
+                        except OSError as error:
+                            decky.logger.warning(f"Failed to persist migrated config: {error}")
+                    return merged
             except Exception as error:
                 decky.logger.warning(f"Failed to read config from {path}: {error}")
 
@@ -139,7 +170,12 @@ class Plugin:
 
     def _write_config_file(self, config):
         self.install_root.mkdir(parents=True, exist_ok=True)
-        self._config_file_path().write_text(self._serialize_config(config), encoding="utf-8")
+        target = self._config_file_path()
+        # Write to a temp file in the same dir then atomically replace, so the
+        # daemon's config watcher never observes (and reloads) a partial file.
+        tmp = target.with_name(target.name + ".tmp")
+        tmp.write_text(self._serialize_config(config), encoding="utf-8")
+        os.replace(tmp, target)
 
     def _subprocess_env(self):
         env = os.environ.copy()
@@ -213,7 +249,11 @@ class Plugin:
         return completed
 
     def _daemon_installed(self):
-        return self.install_binary.exists() and self.user_unit_path.exists() and self.udev_rule_path.exists()
+        service_status = self._read_service_status()
+        unit_file_state = service_status.get("unit_file_state", "unknown")
+        unit_present = self.user_unit_path.exists() or unit_file_state in {"enabled", "enabled-runtime", "static", "indirect"}
+
+        return self.install_binary.exists() and unit_present
 
     def _install_daemon(self, auth_password=""):
         binary = self._bundle_binary_path()
@@ -237,13 +277,14 @@ class Plugin:
         if self._service_active():
             subprocess.run(self._service_command("stop"), capture_output=True, text=True, env=self._subprocess_env(), check=False)
 
-        if config_source.exists():
-            install_config.write_text(config_source.read_text(encoding="utf-8"), encoding="utf-8")
-        else:
-            install_config.write_text(
-                """[global]\nenabled = true\n\n[region]\nx_min = 0.5\nx_max = 1.0\ny_min = 0.0\ny_max = 1.0\n\n[motion]\nsensitivity = 1.0\naccel_strength = 0.4\naccel_exponent = 1.8\nsmoothing = 0.1\ndeadzone = 0.0\n\n[inertia]\nenabled = true\nfriction = 0.92\ncutoff = 0.01\n""",
-                encoding="utf-8",
-            )
+        if not install_config.exists():
+            if config_source.exists():
+                install_config.write_text(config_source.read_text(encoding="utf-8"), encoding="utf-8")
+            else:
+                install_config.write_text(
+                    """[global]\nenabled = true\n\n[input]\nmax_touch_frame_age_ms = 60\n\n[region]\nx_min = 0.5\nx_max = 1.0\ny_min = 0.0\ny_max = 1.0\n\n[motion]\nsensitivity = 4.1\naccel_strength = 0.6\naccel_exponent = 1.2\nsmoothing = 0.15\ndeadzone = 0.0002\n\n[inertia]\nenabled = true\nfriction = 0.97\ncutoff = 0.01\n\n[output]\nmouse = true\ngamepad = false\n""",
+                    encoding="utf-8",
+                )
 
         try:
             with tempfile.NamedTemporaryFile(prefix=".touchscreen-trackpad.", dir=self.install_root, delete=False) as handle:
@@ -284,7 +325,16 @@ class Plugin:
             rule_contents = "\n".join(
                 [
                     "# Touchscreen Trackpad installer-managed permissions",
-                    'SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_TOUCHSCREEN}=="1", SYMLINK+="input/touchscreen-trackpad", TAG+="uaccess"',
+                    "# Numbered 72 so it runs after 60-input-id.rules (ID_INPUT_TOUCHSCREEN) and",
+                    "# before 73-seat-late.rules, where udev queues the uaccess builtin that",
+                    "# grants the active seat session an ACL on the device node. TAG+=\"seat\" is",
+                    "# required because SteamOS assigns uaccess too late (90-inputplumber).",
+                    'SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_TOUCHSCREEN}=="1", TAG+="seat", TAG+="uaccess", SYMLINK+="input/touchscreen-trackpad"',
+                    "# Output devices created via uinput also need session access, otherwise",
+                    "# the daemon can write events but Steam/the compositor cannot open them.",
+                    'KERNEL=="event*", SUBSYSTEM=="input", ATTRS{name}=="Touchscreen Trackpad Virtual Mouse", TAG+="seat", TAG+="uaccess"',
+                    'KERNEL=="event*", SUBSYSTEM=="input", ATTRS{name}=="Touchscreen Trackpad Virtual Gamepad", TAG+="seat", TAG+="uaccess"',
+                    'KERNEL=="js[0-9]*", SUBSYSTEM=="input", ATTRS{name}=="Touchscreen Trackpad Virtual Gamepad", TAG+="seat", TAG+="uaccess"',
                     'KERNEL=="uinput", TAG+="uaccess"',
                     "",
                 ]
@@ -299,12 +349,17 @@ class Plugin:
                 except Exception:
                     pass
 
+            if self.legacy_udev_rule_path.exists():
+                self._run_authorized_udev_helper("uninstall", self.legacy_udev_rule_path, auth_password=auth_password)
+
             subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True, env=self._subprocess_env(), check=False)
+            subprocess.run(["systemctl", "--user", "reset-failure", self.service_name], capture_output=True, text=True, env=self._subprocess_env(), check=False)
             completed = subprocess.run(["systemctl", "--user", "enable", "--now", self.service_name], capture_output=True, text=True, env=self._subprocess_env(), check=False)
             if completed.returncode != 0:
                 raise RuntimeError(
                     self._format_subprocess_error(["systemctl", "--user", "enable", "--now", self.service_name], completed, "Failed to enable daemon")
                 )
+            self._verify_daemon_started()
         finally:
             if temp_binary is not None:
                 try:
@@ -323,8 +378,6 @@ class Plugin:
 
         self.user_unit_path.unlink(missing_ok=True)
         self.install_binary.unlink(missing_ok=True)
-        (self.install_root / "config.toml").unlink(missing_ok=True)
-        shutil.rmtree(self.install_root, ignore_errors=True)
         self.plugin_log_path.unlink(missing_ok=True)
         try:
             self.log_dir.rmdir()
@@ -332,6 +385,8 @@ class Plugin:
             pass
 
         self._run_authorized_udev_helper("uninstall", self.udev_rule_path, auth_password=auth_password)
+        if self.legacy_udev_rule_path.exists():
+            self._run_authorized_udev_helper("uninstall", self.legacy_udev_rule_path, auth_password=auth_password)
 
         return {"ok": True, "stdout": f"Uninstalled {self.service_name}", "stderr": ""}
 
@@ -420,7 +475,41 @@ class Plugin:
         completed = subprocess.run(["systemctl", f"--{self.systemctl_scope}", "is-active", self.service_name], capture_output=True, text=True, env=self._subprocess_env(), check=False)
         return completed.returncode == 0
 
-    async def get_state(self):
+    def _daemon_log_tail(self, lines=25):
+        log_file = self.plugin_log_path.parent / "daemon.log"
+        try:
+            with log_file.open("r", encoding="utf-8", errors="replace") as handle:
+                tail = handle.readlines()[-lines:]
+            return "".join(tail).strip()
+        except OSError:
+            return ""
+
+    def _verify_daemon_started(self, attempts=4, delay=0.5):
+        # Type=simple units report "started" before the process gets to fail,
+        # so poll briefly and surface the real crash reason instead of a
+        # phantom "started" that flips back to "stopped" on the next refresh.
+        for attempt in range(attempts):
+            if self._service_active():
+                return
+            if attempt < attempts - 1:
+                time.sleep(delay)
+
+        status = self._read_service_status()
+        details = self._daemon_log_tail()
+        message = (
+            f"{self.service_name} exited immediately after starting "
+            f"({status.get('active_state')}/{status.get('sub_state')})."
+        )
+        if details:
+            message = f"{message} Recent daemon log:\n{details}"
+        else:
+            message = (
+                f"{message} The daemon most likely cannot open the touchscreen device; "
+                "check udev rule reload and session ACL access."
+            )
+        raise RuntimeError(message)
+
+    def _collect_state(self):
         service_active = self._service_active()
         service_status = self._read_service_status()
         return {
@@ -434,11 +523,33 @@ class Plugin:
             "config": self._read_config_file(),
         }
 
+    async def get_state(self):
+        return await asyncio.to_thread(self._collect_state)
+
+    def _effective_output(self, config):
+        output = {"mouse": True, "gamepad": True}
+        if isinstance(config, dict):
+            section = config.get("output")
+            if isinstance(section, dict):
+                output.update(section)
+        return output
+
     async def set_config(self, patch):
         try:
             current_config = self._read_config_file()
             merged_config = _deep_merge(current_config, patch)
+            # Output uinput nodes only spawn at daemon startup, so a hot config
+            # reload can't add/remove them. Restart only when the effective
+            # output flags actually change, never on unrelated slider tweaks
+            # (the frontend always echoes the whole config as the patch).
+            output_changed = self._effective_output(
+                current_config
+            ) != self._effective_output(merged_config)
             await asyncio.to_thread(self._write_config_file, merged_config)
+            if output_changed:
+                await asyncio.to_thread(self._run_systemctl, "reset-failure", self.service_name)
+                await asyncio.to_thread(self._run_systemctl, "restart", self.service_name)
+                await asyncio.to_thread(self._verify_daemon_started)
             return await self.get_state()
         except Exception as error:
             self._log_exception("Failed to update config", error)
@@ -462,7 +573,16 @@ class Plugin:
 
     async def start_daemon(self):
         try:
-            await asyncio.to_thread(self._run_systemctl, "start", self.service_name)
+            await asyncio.to_thread(
+                subprocess.run,
+                ["systemctl", "--user", "reset-failure", self.service_name],
+                capture_output=True,
+                text=True,
+                env=self._subprocess_env(),
+                check=False,
+            )
+            await asyncio.to_thread(self._run_systemctl, "enable", "--now", self.service_name)
+            await asyncio.to_thread(self._verify_daemon_started)
             return await self.get_state()
         except Exception as error:
             self._log_exception("Failed to start daemon", error)
@@ -470,7 +590,7 @@ class Plugin:
 
     async def stop_daemon(self):
         try:
-            await asyncio.to_thread(self._run_systemctl, "stop", self.service_name)
+            await asyncio.to_thread(self._run_systemctl, "disable", "--now", self.service_name)
             return await self.get_state()
         except Exception as error:
             self._log_exception("Failed to stop daemon", error)
@@ -478,7 +598,16 @@ class Plugin:
 
     async def restart_daemon(self):
         try:
+            await asyncio.to_thread(
+                subprocess.run,
+                ["systemctl", "--user", "reset-failure", self.service_name],
+                capture_output=True,
+                text=True,
+                env=self._subprocess_env(),
+                check=False,
+            )
             await asyncio.to_thread(self._run_systemctl, "restart", self.service_name)
+            await asyncio.to_thread(self._verify_daemon_started)
             return await self.get_state()
         except Exception as error:
             self._log_exception("Failed to restart daemon", error)
@@ -495,6 +624,10 @@ class Plugin:
     async def _main(self):
         self.loop = asyncio.get_event_loop()
         decky.logger.info("Touchscreen Trackpad backend loaded")
+        try:
+            await asyncio.to_thread(self._read_config_file)
+        except Exception as error:
+            self._log_exception("Failed to load config at startup", error)
 
     async def _unload(self):
         decky.logger.info("Touchscreen Trackpad backend unloaded")

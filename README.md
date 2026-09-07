@@ -42,7 +42,7 @@ make builddeploy
 
 ## Desktop Preview
 
-You can preview the UI without entering Game Mode by opening [preview.html](/home/deck/workspace/decky-touchscreen-trackpad/preview.html) in a desktop browser. It shows the not-installed state by default and lets you toggle into the installed state so you can check the header, badges, and control layout.
+You can preview the UI without entering Game Mode by opening [preview.html](preview.html) in a desktop browser. It starts in the not-installed state and lets you switch between the not-installed, stopped, and running states so you can check the simplified header, status indicator, action buttons, and runtime config layout.
 
 ## Deploy
 

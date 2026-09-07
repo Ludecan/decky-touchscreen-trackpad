@@ -373,142 +373,109 @@
       }
     </style>
   </head>
-  <body data-installed="false">
+  <body data-state="not-installed">
     <main class="page">
       <section class="hero">
         <div class="hero-top">
           <div class="title-wrap">
             <div>
               <div class="app-title">Touchscreen Trackpad</div>
-              <div class="subtitle">Standalone desktop preview of the Decky plugin UI. Use the toggle to switch between the not-installed and installed states without entering Game Mode.</div>
+              <div class="subtitle" id="subtitle">Decky plugin for managing the touchscreen-trackpad service. Turn your touchscreen into a configurable trackpad virtual mouse/gamepad input.</div>
             </div>
           </div>
-          <label class="preview-toggle" id="previewToggle">
-            <span class="switch" aria-hidden="true"></span>
-            <span><strong>Preview state:</strong> <span id="previewStateLabel">Not installed</span></span>
-          </label>
+          <span class="pill" data-active="false"><span class="dot"></span><span id="statusLabel">Not Installed</span></span>
         </div>
 
-        <div class="toolbar">
-          <span class="pill" data-active="false"><span class="dot"></span><span id="statusPill">Offline</span></span>
-          <button class="button primary" id="installButton">Install daemon</button>
-          <button class="button hidden" id="refreshButton">Refresh</button>
+        <div class="toolbar" id="statePicker">
+          <button class="button" data-state="not-installed">Not Installed</button>
+          <button class="button" data-state="stopped">Stopped</button>
+          <button class="button" data-state="running">Running</button>
         </div>
 
-        <div class="status-line">
-          <div>Socket: <strong>/tmp/touchscreen-trackpad.sock</strong></div>
-          <div>Service: <strong id="serviceLine">unknown</strong></div>
-          <div>Bundle: <strong>ready</strong> • Install: <strong id="installLine">not installed</strong></div>
-        </div>
+        <div class="toolbar" id="actionBar"></div>
       </section>
 
-      <div class="grid">
-        <section class="section card" id="corePanel">
-          <div class="section-title">Daemon control</div>
-          <div class="section-subtitle">Install the daemon once, then start or stop the service and tune runtime config from Game Mode.</div>
-
-          <div class="badge-row">
-            <span class="badge gray"><span class="dot"></span><span id="runBadge">Stopped</span></span>
-            <span class="badge gray"><span class="dot"></span><span id="installedBadge">Not installed</span></span>
-            <span class="badge blue"><span class="dot"></span><span id="controlBadge">No service control</span></span>
-          </div>
-
-          <div class="toolbar" style="margin-top: 16px;">
-            <button class="button primary" id="secondaryInstallButton">Install daemon</button>
-            <button class="button" id="startButton">Start daemon</button>
-            <button class="button" id="stopButton">Stop daemon</button>
-            <button class="button" id="restartButton">Restart daemon</button>
-            <button class="button" id="recheckButton">Recheck</button>
-          </div>
-
-          <div class="install-banner" id="installHint">The installer writes a user service, a touchscreen symlink rule, and a uinput permission rule. If the button is disabled, the packaged daemon binary is missing from the plugin bundle.</div>
-        </section>
-
-        <section class="stack">
-          <section class="section card">
-            <div class="section-title">Runtime config</div>
-            <div class="section-subtitle">This toggles the daemon's runtime config, while the buttons above manage the systemd unit.</div>
-            <div class="toolbar" style="margin-top: 14px;">
-              <label class="badge gray" style="text-transform:none; letter-spacing:0; font-size:0.88rem; font-weight:700;">
-                <input type="checkbox" checked style="margin-right:10px; accent-color:#84f59f;" />
-                Enabled
-              </label>
-            </div>
-          </section>
-
-          <section class="section card">
-            <div class="section-title">Motion</div>
-            <div class="section-subtitle">Live trackpad tuning parameters.</div>
-            <div class="stack" style="margin-top: 14px;">
-              <div class="slider"><div class="slider-head"><span class="slider-label">Sensitivity</span><span class="slider-value">1.00</span></div><input type="range" min="0.1" max="4" step="0.01" value="1" /></div>
-              <div class="slider"><div class="slider-head"><span class="slider-label">Acceleration strength</span><span class="slider-value">0.40</span></div><input type="range" min="0" max="2" step="0.01" value="0.4" /></div>
-              <div class="slider"><div class="slider-head"><span class="slider-label">Smoothing</span><span class="slider-value">0.10</span></div><input type="range" min="0" max="1" step="0.01" value="0.1" /></div>
-              <div class="slider"><div class="slider-head"><span class="slider-label">Deadzone</span><span class="slider-value">0.000</span></div><input type="range" min="0" max="0.5" step="0.001" value="0" /></div>
-            </div>
-          </section>
-
-          <section class="section card">
-            <div class="section-title">Inertia</div>
-            <div class="section-subtitle">Trackball-style glide after finger lift.</div>
-            <div class="slider" style="margin-top: 14px;"><div class="slider-head"><span class="slider-label">Friction</span><span class="slider-value">0.92</span></div><input type="range" min="0" max="1" step="0.01" value="0.92" /></div>
-          </section>
-
-          <section class="section card">
-            <div class="section-title">Active region</div>
-            <div class="section-subtitle">Normalized coordinates in the touchscreen space.</div>
-            <div class="stack" style="margin-top: 14px;">
-              <div class="slider"><div class="slider-head"><span class="slider-label">Left edge</span><span class="slider-value">50%</span></div><input type="range" min="0" max="1" step="0.01" value="0.5" /></div>
-              <div class="slider"><div class="slider-head"><span class="slider-label">Right edge</span><span class="slider-value">100%</span></div><input type="range" min="0" max="1" step="0.01" value="1" /></div>
-              <div class="slider"><div class="slider-head"><span class="slider-label">Top edge</span><span class="slider-value">0%</span></div><input type="range" min="0" max="1" step="0.01" value="0" /></div>
-              <div class="slider"><div class="slider-head"><span class="slider-label">Bottom edge</span><span class="slider-value">100%</span></div><input type="range" min="0" max="1" step="0.01" value="1" /></div>
-            </div>
-          </section>
-        </section>
-      </div>
+      <section class="section card hidden" id="runtimeSection">
+        <div class="section-title">Runtime config</div>
+        <div class="section-subtitle">Shown only while the daemon is running.</div>
+        <div class="toolbar" style="margin-top: 14px;">
+          <label class="badge gray" style="text-transform:none; letter-spacing:0; font-size:0.88rem; font-weight:700;">
+            <input type="checkbox" checked style="margin-right:10px; accent-color:#84f59f;" />
+            Enabled
+          </label>
+        </div>
+        <div class="stack" style="margin-top: 14px;">
+          <div class="slider"><div class="slider-head"><span class="slider-label">Sensitivity</span><span class="slider-value">1.00</span></div><input type="range" min="0.1" max="4" step="0.01" value="1" /></div>
+          <div class="slider"><div class="slider-head"><span class="slider-label">Acceleration strength</span><span class="slider-value">0.40</span></div><input type="range" min="0" max="2" step="0.01" value="0.4" /></div>
+          <div class="slider"><div class="slider-head"><span class="slider-label">Smoothing</span><span class="slider-value">0.10</span></div><input type="range" min="0" max="1" step="0.01" value="0.1" /></div>
+          <div class="slider"><div class="slider-head"><span class="slider-label">Deadzone</span><span class="slider-value">0.000</span></div><input type="range" min="0" max="0.5" step="0.001" value="0" /></div>
+          <div class="slider"><div class="slider-head"><span class="slider-label">Friction</span><span class="slider-value">0.92</span></div><input type="range" min="0" max="1" step="0.01" value="0.92" /></div>
+          <div class="slider"><div class="slider-head"><span class="slider-label">Left edge</span><span class="slider-value">50%</span></div><input type="range" min="0" max="1" step="0.01" value="0.5" /></div>
+          <div class="slider"><div class="slider-head"><span class="slider-label">Right edge</span><span class="slider-value">100%</span></div><input type="range" min="0" max="1" step="0.01" value="1" /></div>
+          <div class="slider"><div class="slider-head"><span class="slider-label">Top edge</span><span class="slider-value">0%</span></div><input type="range" min="0" max="1" step="0.01" value="0" /></div>
+          <div class="slider"><div class="slider-head"><span class="slider-label">Bottom edge</span><span class="slider-value">100%</span></div><input type="range" min="0" max="1" step="0.01" value="1" /></div>
+        </div>
+      </section>
     </main>
 
     <script>
       const body = document.body;
-      const installButton = document.getElementById("installButton");
-      const secondaryInstallButton = document.getElementById("secondaryInstallButton");
-      const refreshButton = document.getElementById("refreshButton");
-      const corePanel = document.getElementById("corePanel");
-      const previewToggle = document.getElementById("previewToggle");
-      const previewStateLabel = document.getElementById("previewStateLabel");
-      const statusPill = document.getElementById("statusPill");
-      const serviceLine = document.getElementById("serviceLine");
-      const installLine = document.getElementById("installLine");
-      const runBadge = document.getElementById("runBadge");
-      const installedBadge = document.getElementById("installedBadge");
-      const controlBadge = document.getElementById("controlBadge");
-      const installHint = document.getElementById("installHint");
+      const subtitle = document.getElementById("subtitle");
+      const statusLabel = document.getElementById("statusLabel");
+      const statusPill = statusLabel.parentElement;
+      const actionBar = document.getElementById("actionBar");
+      const runtimeSection = document.getElementById("runtimeSection");
+      const stateButtons = Array.from(document.querySelectorAll("#statePicker button"));
 
-      function setInstalled(installed) {
-        body.dataset.installed = String(installed);
-        previewStateLabel.textContent = installed ? "Installed" : "Not installed";
-        statusPill.textContent = installed ? "Connected" : "Offline";
-        serviceLine.textContent = installed ? "running / active / enabled" : "unknown / unknown / unknown";
-        installLine.textContent = installed ? "installed" : "not installed";
-        runBadge.textContent = installed ? "Running" : "Stopped";
-        installedBadge.textContent = installed ? "Installed" : "Not installed";
-        controlBadge.textContent = installed ? "Control ready" : "No service control";
-        installButton.textContent = installed ? "Uninstall daemon" : "Install daemon";
-        secondaryInstallButton.textContent = installed ? "Uninstall daemon" : "Install daemon";
-        refreshButton.classList.toggle("hidden", !installed);
-        corePanel.classList.toggle("hidden", !installed);
-        installHint.textContent = installed
-          ? "The daemon is shown as installed here so you can preview the full control panel, badges, and runtime tuning sections."
-          : "The install path stays visible here so you can verify the compact header state and the single install button used before the daemon exists.";
+      const states = {
+        "not-installed": {
+          label: "Not Installed",
+          title: "Decky plugin for managing the touchscreen-trackpad service. Turn your touchscreen into a configurable trackpad virtual mouse/gamepad input.",
+          actions: [{ label: "Install daemon", next: "stopped", primary: true }],
+        },
+        stopped: {
+          label: "Stopped",
+          title: "",
+          actions: [
+            { label: "Start daemon", next: "running", primary: true },
+            { label: "Uninstall daemon", next: "not-installed", primary: false },
+          ],
+        },
+        running: {
+          label: "Running",
+          title: "",
+          actions: [{ label: "Stop daemon", next: "stopped", primary: true }],
+        },
+      };
+
+      function setState(nextState) {
+        const state = states[nextState];
+        body.dataset.state = nextState;
+        statusLabel.textContent = state.label;
+        statusPill.dataset.active = nextState === "running" ? "true" : "false";
+        subtitle.textContent = state.title;
+        subtitle.classList.toggle("hidden", nextState !== "not-installed");
+        runtimeSection.classList.toggle("hidden", nextState !== "running");
+        actionBar.innerHTML = "";
+
+        state.actions.forEach((action) => {
+          const button = document.createElement("button");
+          button.className = action.primary ? "button primary" : "button";
+          button.textContent = action.label;
+          button.addEventListener("click", () => setState(action.next));
+          actionBar.appendChild(button);
+        });
+
+        stateButtons.forEach((button) => {
+          button.classList.toggle("primary", button.dataset.state === nextState);
+        });
       }
 
-      installButton.addEventListener("click", () => setInstalled(body.dataset.installed !== "true"));
-      secondaryInstallButton.addEventListener("click", () => setInstalled(body.dataset.installed !== "true"));
-      previewToggle.addEventListener("click", () => setInstalled(body.dataset.installed !== "true"));
-      refreshButton.addEventListener("click", () => {
-        statusPill.textContent = body.dataset.installed === "true" ? "Connected" : "Offline";
+      stateButtons.forEach((button) => {
+        button.addEventListener("click", () => setState(button.dataset.state));
       });
 
-      setInstalled(false);
+      setState("not-installed");
     </script>
   </body>
 </html>

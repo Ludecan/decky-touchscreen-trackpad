@@ -24,11 +24,22 @@ type InertiaConfig = {
   cutoff: number;
 };
 
+type OutputConfig = {
+  mouse: boolean;
+  gamepad: boolean;
+};
+
+type InputConfig = {
+  max_touch_frame_age_ms: number;
+};
+
 type DaemonConfig = {
   global: { enabled: boolean };
+  input: InputConfig;
   region: RegionConfig;
   motion: MotionConfig;
   inertia: InertiaConfig;
+  output: OutputConfig;
 };
 
 type DaemonState = {
@@ -55,19 +66,20 @@ const installDaemon = callable<[authPassword: string], DaemonState>("install_dae
 const uninstallDaemon = callable<[authPassword: string], DaemonState>("uninstall_daemon");
 const startDaemon = callable<[], DaemonState>("start_daemon");
 const stopDaemon = callable<[], DaemonState>("stop_daemon");
-const restartDaemon = callable<[], DaemonState>("restart_daemon");
 
 const defaultConfig: DaemonConfig = {
   global: { enabled: true },
+  input: { max_touch_frame_age_ms: 60 },
   region: { x_min: 0.5, x_max: 1.0, y_min: 0.0, y_max: 1.0 },
   motion: {
-    sensitivity: 100,
-    accel_strength: 0.4,
-    accel_exponent: 1.8,
-    smoothing: 0.1,
-    deadzone: 0.0,
+    sensitivity: 4.1,
+    accel_strength: 0.6,
+    accel_exponent: 1.2,
+    smoothing: 0.15,
+    deadzone: 0.0002,
   },
-  inertia: { enabled: true, friction: 0.92, cutoff: 0.01 },
+  inertia: { enabled: true, friction: 0.97, cutoff: 0.01 },
+  output: { mouse: true, gamepad: false },
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -135,6 +147,9 @@ function normalizeConfig(config: Partial<DaemonConfig> | null | undefined): Daem
     global: {
       enabled: config?.global?.enabled ?? defaultConfig.global.enabled,
     },
+    input: {
+      max_touch_frame_age_ms: config?.input?.max_touch_frame_age_ms ?? defaultConfig.input.max_touch_frame_age_ms,
+    },
     region: {
       x_min: config?.region?.x_min ?? defaultConfig.region.x_min,
       x_max: config?.region?.x_max ?? defaultConfig.region.x_max,
@@ -153,15 +168,21 @@ function normalizeConfig(config: Partial<DaemonConfig> | null | undefined): Daem
       friction: config?.inertia?.friction ?? defaultConfig.inertia.friction,
       cutoff: config?.inertia?.cutoff ?? defaultConfig.inertia.cutoff,
     },
+    output: {
+      mouse: config?.output?.mouse ?? defaultConfig.output.mouse,
+      gamepad: config?.output?.gamepad ?? defaultConfig.output.gamepad,
+    },
   };
 }
 
 function mergePatch(base: DaemonConfig, patch: PartialDaemonConfig): DaemonConfig {
   return normalizeConfig({
     global: patch.global ?? base.global,
+    input: patch.input ?? base.input,
     region: patch.region ?? base.region,
     motion: patch.motion ?? base.motion,
     inertia: patch.inertia ?? base.inertia,
+    output: patch.output ?? base.output,
   });
 }
 
@@ -261,10 +282,10 @@ function SliderRow({
 function Content() {
   const [state, setState] = useState<DaemonState | null>(null);
   const [config, setLocalConfig] = useState<DaemonConfig>(defaultConfig);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [, setLoading] = useState(true);
+  const [, setSaving] = useState(false);
   const [installing, setInstalling] = useState(false);
-  const [inlineError, setInlineError] = useState<InlineError | null>(null);
+  const [, setInlineError] = useState<InlineError | null>(null);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authPassword, setAuthPassword] = useState("");
   const [authMode, setAuthMode] = useState<"install" | "uninstall" | null>(null);
@@ -272,8 +293,21 @@ function Content() {
   const [authError, setAuthError] = useState<string | null>(null);
   const authPasswordRef = useRef(authPassword);
   const authBusyRef = useRef(authBusy);
+  const pendingConfigRef = useRef<DaemonConfig | null>(null);
+  const saveTimerRef = useRef<number | null>(null);
   authPasswordRef.current = authPassword;
   authBusyRef.current = authBusy;
+
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current !== null) {
+        window.clearTimeout(saveTimerRef.current);
+      }
+      if (pendingConfigRef.current) {
+        void setConfig(pendingConfigRef.current);
+      }
+    };
+  }, []);
 
   // Intercept Enter in capture phase so ModalRoot doesn't close the dialog first.
   useEffect(() => {
@@ -322,9 +356,56 @@ function Content() {
 
   const applyPatch = async (patch: PartialDaemonConfig) => {
     setLocalConfig((current) => mergePatch(current, patch));
+    pendingConfigRef.current = mergePatch(pendingConfigRef.current ?? config, patch);
+
+    if (saveTimerRef.current !== null) {
+      window.clearTimeout(saveTimerRef.current);
+    }
+
+    saveTimerRef.current = window.setTimeout(() => {
+      const nextConfig = pendingConfigRef.current;
+      pendingConfigRef.current = null;
+      saveTimerRef.current = null;
+
+      if (!nextConfig) {
+        return;
+      }
+
+      setSaving(true);
+      void setConfig(nextConfig)
+        .then((next) => {
+          setState(next);
+          if (next.config) {
+            setLocalConfig(normalizeConfig(next.config));
+          }
+          setInlineError(null);
+        })
+        .catch(async (error) => {
+          const message = recordInlineError("Failed to update config", "setConfig(patch)", error);
+          toaster.toast({ title: "Failed to update config", body: message });
+          await refresh();
+        })
+        .finally(() => {
+          setSaving(false);
+        });
+    }, 180);
+  };
+
+  const flushPendingConfig = async () => {
+    const nextConfig = pendingConfigRef.current;
+    if (saveTimerRef.current !== null) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    pendingConfigRef.current = null;
+
+    if (!nextConfig) {
+      return;
+    }
+
     setSaving(true);
     try {
-      const next = await setConfig(patch);
+      const next = await setConfig(nextConfig);
       setState(next);
       if (next.config) {
         setLocalConfig(normalizeConfig(next.config));
@@ -340,6 +421,7 @@ function Content() {
   };
 
   const runServiceAction = async (action: () => Promise<DaemonState>) => {
+    await flushPendingConfig();
     try {
       const next = await action();
       setState(next);
@@ -355,6 +437,7 @@ function Content() {
   };
 
   const runInstall = async (password: string) => {
+    await flushPendingConfig();
     setInstalling(true);
     try {
       const next = state?.daemon_installed
@@ -420,12 +503,20 @@ function Content() {
     await applyPatch({ global: { enabled } });
   };
 
+  const updateOutput = async (patch: Partial<OutputConfig>) => {
+    await applyPatch({ output: { ...config.output, ...patch } });
+  };
+
   const updateRegion = async (nextRegion: RegionConfig) => {
     await applyPatch({ region: nextRegion });
   };
 
   const updateMotion = async (nextMotion: MotionConfig) => {
     await applyPatch({ motion: nextMotion });
+  };
+
+  const updateInput = async (nextInput: InputConfig) => {
+    await applyPatch({ input: nextInput });
   };
 
   const updateInertia = async (nextInertia: InertiaConfig) => {
@@ -450,19 +541,11 @@ function Content() {
   };
 
   const controlReady = state?.service_control_ready ?? false;
-  const bundleReady = state?.daemon_bundle_ready ?? false;
   const daemonInstalled = state?.daemon_installed ?? false;
-  const connected = state?.connected ?? false;
   const serviceStatus = state?.service_status;
   const serviceActive = serviceStatus?.active_state === "active" || state?.service_active === true;
-  const showInstalledUI = daemonInstalled || serviceActive;
-  const statusLabel = loading
-    ? "Loading"
-    : connected
-      ? serviceActive
-        ? "Connected"
-        : "Socket ready"
-      : "Offline";
+  const statusLabel = serviceActive ? "Running" : daemonInstalled ? "Stopped" : "Not Installed";
+  const showRuntimeConfig = serviceActive;
 
   return (
     <div
@@ -488,276 +571,219 @@ function Content() {
       >
         <section
           style={{
-            padding: "1rem",
-            borderRadius: 18,
-            background: "rgba(20, 25, 35, 0.96)",
-            border: `1px solid ${inlineError ? "rgba(255, 127, 145, 0.3)" : "rgba(137, 145, 175, 0.18)"}`,
-            boxShadow: "0 18px 45px rgba(0, 0, 0, 0.26)",
-            color: "#ffe7eb",
-          }}
-        >
-          <div style={{ fontSize: "0.95rem", fontWeight: 800, marginBottom: "0.4rem" }}>Debug</div>
-          <div style={{ display: "grid", gap: "0.4rem", fontSize: "0.82rem", color: "#d4d7e0" }}>
-            <div>
-              Install state: <strong style={{ color: "#f4f6fb" }}>{daemonInstalled ? "installed" : "not installed"}</strong>
-            </div>
-            <div>
-              Bundle: <strong style={{ color: "#f4f6fb" }}>{bundleReady ? "ready" : "missing"}</strong>
-            </div>
-            <div>
-              Control: <strong style={{ color: "#f4f6fb" }}>{controlReady ? "ready" : "not ready"}</strong>
-            </div>
-            <div>
-              Socket: <strong style={{ color: "#f4f6fb" }}>{state?.socket_path ?? "unknown"}</strong>
-            </div>
-            <div>
-              Plugin log: <strong style={{ color: "#f4f6fb" }}>~/.local/state/touchscreen-trackpad/plugin.log</strong>
-            </div>
-          </div>
-
-          <div style={{ marginTop: "0.9rem", paddingTop: "0.8rem", borderTop: "1px solid rgba(255, 255, 255, 0.12)" }}>
-            <div style={{ fontSize: "0.86rem", fontWeight: 700, marginBottom: "0.35rem", color: inlineError ? "#ffbcc6" : "#aeb5c7" }}>
-              {inlineError ? inlineError.title : "No error captured"}
-            </div>
-            <div style={{ fontSize: "0.78rem", fontWeight: 700, marginBottom: "0.45rem", color: inlineError ? "#ffbcc6" : "#aeb5c7" }}>
-              {inlineError ? `Failed call: ${inlineError.call}` : "Waiting for the next failure to capture details."}
-            </div>
-            <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.5, fontSize: "0.86rem", color: inlineError ? "#ffd8de" : "#cfd5e2" }}>
-              {inlineError ? inlineError.message : "This panel stays visible even when the daemon is not installed, so you can confirm bundle state and the current socket path before testing install."}
-            </div>
-            {inlineError ? (
-              <div style={{ marginTop: "0.8rem", paddingTop: "0.75rem", borderTop: "1px solid rgba(255, 255, 255, 0.12)" }}>
-                <div style={{ fontSize: "0.8rem", fontWeight: 700, marginBottom: "0.35rem", color: "#ffbcc6" }}>Raw exception</div>
-                <pre
-                  style={{
-                    margin: 0,
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                    maxHeight: 240,
-                    overflow: "auto",
-                    fontSize: "0.78rem",
-                    lineHeight: 1.45,
-                    color: "#ffeef1",
-                  }}
-                >
-                  {inlineError.raw}
-                </pre>
-              </div>
-            ) : null}
-          </div>
-        </section>
-
-        <section
-          style={{
             padding: "1.1rem 1rem",
             borderRadius: 20,
             background: "linear-gradient(135deg, rgba(25, 33, 53, 0.98), rgba(12, 17, 29, 0.98))",
             border: "1px solid rgba(137, 145, 175, 0.16)",
           }}
         >
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", alignItems: "stretch" }}>
-            <div style={{ width: "100%", minWidth: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.35rem", flexWrap: "wrap", minWidth: 0 }}>
-                <div className={staticClasses.Title}>Touchscreen Trackpad</div>
-                <Badge active={connected} label={statusLabel} />
-              </div>
-              <div style={{ color: "#aeb5c7", fontSize: "0.92rem", maxWidth: 640 }}>
-                Install the daemon, manage the user service from Game Mode, and tune the runtime config over JSON IPC.
-              </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+              <div className={staticClasses.Title}>Touchscreen Trackpad</div>
+              {!daemonInstalled ? (
+                <div style={{ color: "#aeb5c7", fontSize: "0.92rem", maxWidth: 680, lineHeight: 1.45 }}>
+                  Decky plugin for managing the touchscreen-trackpad service. Turn your touchscreen into a configurable trackpad virtual mouse/gamepad input.
+                </div>
+              ) : null}
             </div>
-            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", justifyContent: "flex-start", width: "100%" }}>
-              {showInstalledUI ? (
-                <ButtonItem layout="below" onClick={() => void refresh()}>
-                  Refresh
-                </ButtonItem>
-              ) : (
+
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+              <Badge active={serviceActive} label={statusLabel} />
+              {!daemonInstalled ? (
                 <ButtonItem layout="below" onClick={() => openAuthorizationModal("install")} disabled={installing}>
                   Install daemon
                 </ButtonItem>
+              ) : serviceActive ? (
+                <ButtonItem layout="below" onClick={() => void runServiceAction(stopDaemon)} disabled={!controlReady}>
+                  Stop daemon
+                </ButtonItem>
+              ) : (
+                <>
+                  <ButtonItem layout="below" onClick={() => void runServiceAction(startDaemon)} disabled={!controlReady}>
+                    Start daemon
+                  </ButtonItem>
+                  <ButtonItem layout="below" onClick={() => openAuthorizationModal("uninstall")} disabled={installing}>
+                    Uninstall daemon
+                  </ButtonItem>
+                </>
               )}
             </div>
           </div>
-          <div style={{ marginTop: "0.75rem", fontSize: "0.82rem", color: "#8f98ad" }}>
-            Socket: {state?.socket_path ?? "unknown"} {saving ? "• saving" : ""}
-          </div>
-          <div style={{ marginTop: "0.45rem", fontSize: "0.82rem", color: "#8f98ad" }}>
-            Service: {serviceStatus?.active_state ?? "unknown"} / {serviceStatus?.sub_state ?? "unknown"} / {serviceStatus?.unit_file_state ?? "unknown"}
-          </div>
-          <div style={{ marginTop: "0.45rem", fontSize: "0.82rem", color: "#8f98ad" }}>
-            Bundle: {bundleReady ? "ready" : "missing"} • Install: {daemonInstalled ? "installed" : "not installed"}
-          </div>
         </section>
 
-        {showInstalledUI ? (
-        <PanelSection title="Core">
-          <PanelSectionRow>
-            <SectionCard
-              title="Daemon control"
-              subtitle="Install the daemon once, then start or stop the service and tune runtime config from Game Mode."
-            >
-              <div style={{ display: "flex", flexDirection: "column", gap: "0.9rem" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
-                  <Badge active={serviceActive} label={serviceActive ? "Running" : "Stopped"} />
-                  <Badge active={daemonInstalled} label={daemonInstalled ? "Installed" : "Not installed"} />
-                  <Badge active={controlReady} label={controlReady ? "Control ready" : "No service control"} />
-                </div>
-                <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-                  <ButtonItem layout="below" onClick={() => openAuthorizationModal(daemonInstalled ? "uninstall" : "install")} disabled={installing}>
-                    {daemonInstalled ? "Uninstall daemon" : "Install daemon"}
-                  </ButtonItem>
-                  <ButtonItem layout="below" onClick={() => void runServiceAction(startDaemon)} disabled={serviceActive || !controlReady}>
-                    Start daemon
-                  </ButtonItem>
-                  <ButtonItem layout="below" onClick={() => void runServiceAction(stopDaemon)} disabled={!serviceActive || !controlReady}>
-                    Stop daemon
-                  </ButtonItem>
-                  <ButtonItem layout="below" onClick={() => void runServiceAction(restartDaemon)} disabled={!controlReady}>
-                    Restart daemon
-                  </ButtonItem>
-                  <ButtonItem layout="below" onClick={() => void refresh()}>
-                    Recheck
-                  </ButtonItem>
-                </div>
-                <div style={{ color: "#aeb5c7", fontSize: "0.82rem" }}>
-                  The installer writes a user service, a touchscreen symlink rule, and a uinput permission rule. If the packaged daemon files are missing, the click will fail with a detailed error instead of being blocked here.
-                </div>
-              </div>
-            </SectionCard>
-          </PanelSectionRow>
+        {showRuntimeConfig ? (
+          <PanelSection title="Runtime config">
+            <PanelSectionRow>
+              <SectionCard title="Runtime enabled" subtitle="Enable or disable the daemon's runtime config.">
+                <label style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                  <input
+                    type="checkbox"
+                    checked={config.global.enabled}
+                    onChange={(event) => void toggleEnabled(event.currentTarget.checked)}
+                  />
+                  <span style={{ color: "#e8ebf5", fontWeight: 600 }}>
+                    {config.global.enabled ? "Enabled" : "Disabled"}
+                  </span>
+                </label>
+              </SectionCard>
+            </PanelSectionRow>
 
-          <PanelSectionRow>
-            <SectionCard
-              title="Runtime config"
-              subtitle="This toggles the daemon's runtime config, while the buttons above manage the systemd unit."
-            >
-              <label style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                <input
-                  type="checkbox"
-                  checked={config.global.enabled}
-                  onChange={(event) => void toggleEnabled(event.currentTarget.checked)}
+            <PanelSectionRow>
+              <SectionCard
+                title="Output devices"
+                subtitle="If a game also treats the virtual gamepad as a second controller (e.g. uzdoom) and double-applies aim, disable the gamepad. Applies immediately (restarts the daemon)."
+              >
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                    <input
+                      type="checkbox"
+                      checked={config.output.mouse}
+                      disabled={!config.output.gamepad}
+                      onChange={(event) => void updateOutput({ mouse: event.currentTarget.checked })}
+                    />
+                    <span style={{ color: "#e8ebf5", fontWeight: 600 }}>Virtual mouse</span>
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+                    <input
+                      type="checkbox"
+                      checked={config.output.gamepad}
+                      disabled={!config.output.mouse}
+                      onChange={(event) => void updateOutput({ gamepad: event.currentTarget.checked })}
+                    />
+                    <span style={{ color: "#e8ebf5", fontWeight: 600 }}>Virtual gamepad</span>
+                  </label>
+                </div>
+              </SectionCard>
+            </PanelSectionRow>
+
+            <PanelSectionRow>
+              <SectionCard title="Input timing" subtitle="Tune how aggressively the UI drops delayed touch frames.">
+                <SliderRow
+                  label="Max frame age"
+                  value={config.input.max_touch_frame_age_ms}
+                  min={4}
+                  max={100}
+                  step={1}
+                  format={(value) => `${value.toFixed(0)} ms`}
+                  onChange={(value) => void updateInput({ ...config.input, max_touch_frame_age_ms: value })}
                 />
-                <span style={{ color: "#e8ebf5", fontWeight: 600 }}>
-                  {config.global.enabled ? "Enabled" : "Disabled"}
+              </SectionCard>
+            </PanelSectionRow>
 
-                </span>
-              </label>
-            </SectionCard>
-          </PanelSectionRow>
+            <PanelSectionRow>
+              <SectionCard title="Motion" subtitle="Live trackpad tuning parameters.">
+                <SliderRow
+                  label="Sensitivity"
+                  value={config.motion.sensitivity}
+                  min={0.1}
+                  max={50}
+                  step={0.5}
+                  format={(value) => `${value.toFixed(1)}x`}
+                  onChange={(value) => void updateMotion({ ...config.motion, sensitivity: value })}
+                />
+                <SliderRow
+                  label="Acceleration strength"
+                  value={config.motion.accel_strength}
+                  min={0}
+                  max={2}
+                  step={0.01}
+                  format={(value) => value.toFixed(2)}
+                  onChange={(value) => void updateMotion({ ...config.motion, accel_strength: value })}
+                />
+                <SliderRow
+                  label="Acceleration exponent"
+                  value={config.motion.accel_exponent}
+                  min={0.5}
+                  max={3}
+                  step={0.01}
+                  format={(value) => value.toFixed(2)}
+                  onChange={(value) => void updateMotion({ ...config.motion, accel_exponent: value })}
+                />
+                <SliderRow
+                  label="Smoothing"
+                  value={config.motion.smoothing}
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  format={(value) => value.toFixed(2)}
+                  onChange={(value) => void updateMotion({ ...config.motion, smoothing: value })}
+                />
+                <SliderRow
+                  label="Deadzone"
+                  value={config.motion.deadzone}
+                  min={0}
+                  max={0.005}
+                  step={0.0002}
+                  format={(value) => value.toFixed(4)}
+                  onChange={(value) => void updateMotion({ ...config.motion, deadzone: value })}
+                />
+              </SectionCard>
+            </PanelSectionRow>
 
-          <PanelSectionRow>
-            <SectionCard title="Motion" subtitle="Live trackpad tuning parameters.">
-              <SliderRow
-                label="Sensitivity"
-                value={config.motion.sensitivity}
-                min={1}
-                max={200}
-                step={1}
-                format={(value) => value.toFixed(2)}
-                onChange={(value) => void updateMotion({ ...config.motion, sensitivity: value })}
-              />
-              <SliderRow
-                label="Acceleration strength"
-                value={config.motion.accel_strength}
-                min={0}
-                max={2}
-                step={0.01}
-                format={(value) => value.toFixed(2)}
-                onChange={(value) => void updateMotion({ ...config.motion, accel_strength: value })}
-              />
-              <SliderRow
-                label="Acceleration exponent"
-                value={config.motion.accel_exponent}
-                min={0.5}
-                max={3}
-                step={0.01}
-                format={(value) => value.toFixed(2)}
-                onChange={(value) => void updateMotion({ ...config.motion, accel_exponent: value })}
-              />
-              <SliderRow
-                label="Smoothing"
-                value={config.motion.smoothing}
-                min={0}
-                max={1}
-                step={0.01}
-                format={(value) => value.toFixed(2)}
-                onChange={(value) => void updateMotion({ ...config.motion, smoothing: value })}
-              />
-              <SliderRow
-                label="Deadzone"
-                value={config.motion.deadzone}
-                min={0}
-                max={0.5}
-                step={0.001}
-                format={(value) => value.toFixed(3)}
-                onChange={(value) => void updateMotion({ ...config.motion, deadzone: value })}
-              />
-            </SectionCard>
-          </PanelSectionRow>
+            <PanelSectionRow>
+              <SectionCard title="Inertia" subtitle="Trackball-style glide after finger lift.">
+                <SliderRow
+                  label="Friction"
+                  value={config.inertia.friction}
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  format={(value) => value.toFixed(2)}
+                  onChange={(value) => void updateInertia({ ...config.inertia, friction: value })}
+                />
+                <SliderRow
+                  label="Cutoff"
+                  value={config.inertia.cutoff}
+                  min={0}
+                  max={0.1}
+                  step={0.001}
+                  format={(value) => value.toFixed(3)}
+                  onChange={(value) => void updateInertia({ ...config.inertia, cutoff: value })}
+                />
+              </SectionCard>
+            </PanelSectionRow>
 
-          <PanelSectionRow>
-            <SectionCard title="Inertia" subtitle="Trackball-style glide after finger lift.">
-              <SliderRow
-                label="Friction"
-                value={config.inertia.friction}
-                min={0}
-                max={1}
-                step={0.01}
-                format={(value) => value.toFixed(2)}
-                onChange={(value) => void updateInertia({ ...config.inertia, friction: value })}
-              />
-              <SliderRow
-                label="Cutoff"
-                value={config.inertia.cutoff}
-                min={0}
-                max={0.1}
-                step={0.001}
-                format={(value) => value.toFixed(3)}
-                onChange={(value) => void updateInertia({ ...config.inertia, cutoff: value })}
-              />
-            </SectionCard>
-          </PanelSectionRow>
-
-          <PanelSectionRow>
-            <SectionCard title="Active region" subtitle="Normalized coordinates in the touchscreen space.">
-              <SliderRow
-                label="Left edge"
-                value={config.region.x_min}
-                min={0}
-                max={1}
-                step={0.01}
-                format={(value) => `${Math.round(value * 100)}%`}
-                onChange={(value) => void updateRegionBounds("x_min", value)}
-              />
-              <SliderRow
-                label="Right edge"
-                value={config.region.x_max}
-                min={0}
-                max={1}
-                step={0.01}
-                format={(value) => `${Math.round(value * 100)}%`}
-                onChange={(value) => void updateRegionBounds("x_max", value)}
-              />
-              <SliderRow
-                label="Top edge"
-                value={config.region.y_min}
-                min={0}
-                max={1}
-                step={0.01}
-                format={(value) => `${Math.round(value * 100)}%`}
-                onChange={(value) => void updateRegionBounds("y_min", value)}
-              />
-              <SliderRow
-                label="Bottom edge"
-                value={config.region.y_max}
-                min={0}
-                max={1}
-                step={0.01}
-                format={(value) => `${Math.round(value * 100)}%`}
-                onChange={(value) => void updateRegionBounds("y_max", value)}
-              />
-            </SectionCard>
-          </PanelSectionRow>
-        </PanelSection>
+            <PanelSectionRow>
+              <SectionCard title="Active region" subtitle="Normalized coordinates in the touchscreen space.">
+                <SliderRow
+                  label="Left edge"
+                  value={config.region.x_min}
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  format={(value) => `${Math.round(value * 100)}%`}
+                  onChange={(value) => void updateRegionBounds("x_min", value)}
+                />
+                <SliderRow
+                  label="Right edge"
+                  value={config.region.x_max}
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  format={(value) => `${Math.round(value * 100)}%`}
+                  onChange={(value) => void updateRegionBounds("x_max", value)}
+                />
+                <SliderRow
+                  label="Top edge"
+                  value={config.region.y_min}
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  format={(value) => `${Math.round(value * 100)}%`}
+                  onChange={(value) => void updateRegionBounds("y_min", value)}
+                />
+                <SliderRow
+                  label="Bottom edge"
+                  value={config.region.y_max}
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  format={(value) => `${Math.round(value * 100)}%`}
+                  onChange={(value) => void updateRegionBounds("y_max", value)}
+                />
+              </SectionCard>
+            </PanelSectionRow>
+          </PanelSection>
         ) : null}
 
         {authModalOpen ? (

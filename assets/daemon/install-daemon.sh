@@ -8,7 +8,13 @@ INSTALL_BINARY=$INSTALL_ROOT/touchscreen-trackpad
 INSTALL_CONFIG=$INSTALL_ROOT/config.toml
 USER_UNIT_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user
 USER_UNIT_PATH=$USER_UNIT_DIR/touchscreen-trackpad.service
-UDEV_RULE_PATH=/etc/udev/rules.d/99-touchscreen-trackpad.rules
+# Must sort after 60-input-id.rules (sets ID_INPUT_TOUCHSCREEN) but BEFORE
+# 73-seat-late.rules: that is where udev queues the "uaccess" builtin that
+# actually grants the active session access (ACL) to the touchscreen. A rule
+# numbered 99+ only sets the tag after the ACL logic already ran, so it is a
+# no-op for permissions (SteamOS grants uaccess late via 90-inputplumber rules).
+UDEV_RULE_PATH=/etc/udev/rules.d/72-touchscreen-trackpad.rules
+LEGACY_UDEV_RULE_PATH=/etc/udev/rules.d/99-touchscreen-trackpad.rules
 SERVICE_NAME=${TOUCHSCREEN_TRACKPAD_SERVICE:-touchscreen-trackpad.service}
 SOCKET_PATH=${TOUCHSCREEN_TRACKPAD_SOCKET:-/tmp/touchscreen-trackpad.sock}
 RUST_LOG=${RUST_LOG:-info}
@@ -45,13 +51,17 @@ y_max = 1.0
 sensitivity = 1.0
 accel_strength = 0.4
 accel_exponent = 1.8
-smoothing = 0.1
-deadzone = 0.0
+smoothing = 0.4
+deadzone = 0.001
 
 [inertia]
 enabled = true
 friction = 0.92
 cutoff = 0.01
+
+[output]
+mouse = true
+gamepad = true
 EOF
 fi
 
@@ -75,6 +85,11 @@ cat > "$USER_UNIT_PATH" <<EOF
 [Unit]
 Description=Touchscreen Trackpad daemon
 After=graphical-session.target
+# The plugin restarts this service when the [output] config changes; disable
+# systemd's start-rate limiting so a quick restart can't trip
+# "start request repeated too quickly" and surface as a config error.
+StartLimitIntervalSec=0
+StartLimitBurst=0
 
 [Service]
 Type=simple
@@ -93,12 +108,23 @@ EOF
 RULE_FILE=$(mktemp)
 cat > "$RULE_FILE" <<'EOF'
 # Touchscreen Trackpad installer-managed permissions
-SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_TOUCHSCREEN}=="1", SYMLINK+="input/touchscreen-trackpad", TAG+="uaccess"
+# Numbered 72 so it runs after 60-input-id.rules (ID_INPUT_TOUCHSCREEN) and
+# before 73-seat-late.rules, where udev queues the uaccess builtin that grants
+# the active seat session an ACL on the device node. TAG+="seat" is required
+# because SteamOS assigns uaccess too late (90-inputplumber) for the seat tag.
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_TOUCHSCREEN}=="1", TAG+="seat", TAG+="uaccess", SYMLINK+="input/touchscreen-trackpad"
+# Output devices created via uinput also need session access, otherwise the
+# daemon can write events but compositors/Steam running as the user cannot
+# open the virtual mouse/gamepad nodes.
+KERNEL=="event*", SUBSYSTEM=="input", ATTRS{name}=="Touchscreen Trackpad Virtual Mouse", TAG+="seat", TAG+="uaccess"
+KERNEL=="event*", SUBSYSTEM=="input", ATTRS{name}=="Touchscreen Trackpad Virtual Gamepad", TAG+="seat", TAG+="uaccess"
+KERNEL=="js[0-9]*", SUBSYSTEM=="input", ATTRS{name}=="Touchscreen Trackpad Virtual Gamepad", TAG+="seat", TAG+="uaccess"
 KERNEL=="uinput", TAG+="uaccess"
 EOF
 
 if command -v sudo >/dev/null 2>&1; then
   sudo install -Dm644 "$RULE_FILE" "$UDEV_RULE_PATH"
+  sudo rm -f "$LEGACY_UDEV_RULE_PATH"
   if command -v udevadm >/dev/null 2>&1; then
     sudo udevadm control --reload-rules
     sudo udevadm trigger --subsystem-match=input

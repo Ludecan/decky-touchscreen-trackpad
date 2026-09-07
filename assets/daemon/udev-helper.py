@@ -8,7 +8,13 @@ import sys
 from pathlib import Path
 
 RULE_CONTENT = """# Touchscreen Trackpad installer-managed permissions
-SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_TOUCHSCREEN}=="1", SYMLINK+="input/touchscreen-trackpad", TAG+="uaccess"
+# Numbered 72 so it runs after 60-input-id.rules (ID_INPUT_TOUCHSCREEN) and
+# before 73-seat-late.rules, where udev queues the uaccess builtin that grants
+# the active seat session an ACL on the device node.
+SUBSYSTEM=="input", KERNEL=="event*", ENV{ID_INPUT_TOUCHSCREEN}=="1", TAG+="seat", TAG+="uaccess", SYMLINK+="input/touchscreen-trackpad"
+KERNEL=="event*", SUBSYSTEM=="input", ATTRS{name}=="Touchscreen Trackpad Virtual Mouse", TAG+="seat", TAG+="uaccess"
+KERNEL=="event*", SUBSYSTEM=="input", ATTRS{name}=="Touchscreen Trackpad Virtual Gamepad", TAG+="seat", TAG+="uaccess"
+KERNEL=="js[0-9]*", SUBSYSTEM=="input", ATTRS{name}=="Touchscreen Trackpad Virtual Gamepad", TAG+="seat", TAG+="uaccess"
 KERNEL=="uinput", TAG+="uaccess"
 """
 
