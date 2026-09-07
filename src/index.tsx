@@ -75,7 +75,7 @@ const defaultConfig: DaemonConfig = {
     sensitivity: 4.1,
     accel_strength: 0.6,
     accel_exponent: 1.2,
-    smoothing: 0.15,
+    smoothing: 0.5,
     deadzone: 0.0002,
   },
   inertia: { enabled: true, friction: 0.97, cutoff: 0.01 },
@@ -700,11 +700,11 @@ function Content() {
                   onChange={(value) => void updateMotion({ ...config.motion, accel_exponent: value })}
                 />
                 <SliderRow
-                  label="Smoothing"
+                  label="Smoothing (higher = smoother)"
                   value={config.motion.smoothing}
                   min={0}
                   max={1}
-                  step={0.01}
+                  step={0.05}
                   format={(value) => value.toFixed(2)}
                   onChange={(value) => void updateMotion({ ...config.motion, smoothing: value })}
                 />

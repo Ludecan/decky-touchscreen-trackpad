@@ -3,7 +3,7 @@ enabled = true
 
 [input]
 # Drop touch frames older than this many milliseconds before processing.
-max_touch_frame_age_ms = 36
+max_touch_frame_age_ms = 60
 
 [region]
 # Active trackpad area as fractions of the full screen (0.0 = left/top, 1.0 = right/bottom).
@@ -15,23 +15,23 @@ y_max = 1.0
 
 [motion]
 # Base movement multiplier.
-sensitivity = 100
+sensitivity = 4.1
 # How strongly speed amplifies movement (0.0 = off).
-accel_strength = 0.7
+accel_strength = 0.6
 # Power-law exponent for the acceleration curve.
-accel_exponent = 1.87
-# Exponential moving-average smoothing factor (0.0 = full smoothing, 1.0 = off).
-smoothing = 0.4
+accel_exponent = 1.2
+# Smoothing strength (0.0 = crisp / no smoothing, 1.0 = maximum smoothing).
+smoothing = 0.5
 # Minimum per-frame delta magnitude (in screen fractions) required to register
 # movement. On a ~240 Hz touchscreen each frame's delta is tiny, so keep this
 # small (0.0-0.002); large values erase slow motion and cause chop.
-deadzone = 0.001
+deadzone = 0.0002
 
 [inertia]
 # Whether trackball/inertia effect is active after finger lift.
 enabled = true
 # Velocity retention per tick (0.0 = instant stop, 1.0 = no friction).
-friction = 0.95
+friction = 0.97
 # Stop inertia when speed drops below this value.
 cutoff = 0.01
 
@@ -50,4 +50,4 @@ max_movement = 0.02
 # gamepad = false (and mouse = true); restarting the daemon is required for
 # changes here to take effect.
 mouse = true
-gamepad = true
+gamepad = false

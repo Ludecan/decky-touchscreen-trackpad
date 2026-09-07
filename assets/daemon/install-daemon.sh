@@ -48,20 +48,20 @@ y_min = 0.0
 y_max = 1.0
 
 [motion]
-sensitivity = 1.0
-accel_strength = 0.4
-accel_exponent = 1.8
-smoothing = 0.4
-deadzone = 0.001
+sensitivity = 4.1
+accel_strength = 0.6
+accel_exponent = 1.2
+smoothing = 0.5
+deadzone = 0.0002
 
 [inertia]
 enabled = true
-friction = 0.92
+friction = 0.97
 cutoff = 0.01
 
 [output]
 mouse = true
-gamepad = true
+gamepad = false
 EOF
 fi
 
