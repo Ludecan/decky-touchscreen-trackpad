@@ -713,8 +713,8 @@ function Content() {
                   value={config.motion.deadzone}
                   min={0}
                   max={0.005}
-                  step={0.0002}
-                  format={(value) => value.toFixed(4)}
+                   step={0.00005}
+                   format={(value) => value.toFixed(5)}
                   onChange={(value) => void updateMotion({ ...config.motion, deadzone: value })}
                 />
               </SectionCard>
