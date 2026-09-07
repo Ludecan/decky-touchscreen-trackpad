@@ -56,7 +56,7 @@ deadzone = 0.0002
 
 [inertia]
 enabled = true
-friction = 0.97
+friction = 0.20
 cutoff = 0.01
 
 [output]

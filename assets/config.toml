@@ -28,10 +28,11 @@ smoothing = 0.5
 deadzone = 0.0002
 
 [inertia]
-# Whether trackball/inertia effect is active after finger lift.
+# Trackball-style glide. Starts when movement stops (a still finger, pressed or
+# lifted, decays the last velocity to a stop) rather than only on lift.
 enabled = true
-# Velocity retention per tick (0.0 = instant stop, 1.0 = no friction).
-friction = 0.97
+# Stopping strength (0.0 = longest glide, 1.0 = stops immediately).
+friction = 0.20
 # Stop inertia when speed drops below this value.
 cutoff = 0.01
 

@@ -78,7 +78,7 @@ const defaultConfig: DaemonConfig = {
     smoothing: 0.5,
     deadzone: 0.0002,
   },
-  inertia: { enabled: true, friction: 0.97, cutoff: 0.01 },
+  inertia: { enabled: true, friction: 0.20, cutoff: 0.01 },
   output: { mouse: true, gamepad: false },
 };
 
@@ -721,9 +721,9 @@ function Content() {
             </PanelSectionRow>
 
             <PanelSectionRow>
-              <SectionCard title="Inertia" subtitle="Trackball-style glide after finger lift.">
+              <SectionCard title="Inertia" subtitle="Glide that settles when movement stops (pressed or lifted).">
                 <SliderRow
-                  label="Friction"
+                  label="Friction (higher = stops sooner)"
                   value={config.inertia.friction}
                   min={0}
                   max={1}
