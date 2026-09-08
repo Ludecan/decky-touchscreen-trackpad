@@ -503,8 +503,14 @@ function Content() {
     await applyPatch({ global: { enabled } });
   };
 
-  const updateOutput = async (patch: Partial<OutputConfig>) => {
-    await applyPatch({ output: { ...config.output, ...patch } });
+  const aimMode: "mouse" | "gamepad" = config.output.gamepad ? "gamepad" : "mouse";
+  const setAimMode = async (mode: "mouse" | "gamepad") => {
+    const next: OutputConfig =
+      mode === "gamepad" ? { mouse: false, gamepad: true } : { mouse: true, gamepad: false };
+    if (config.output.mouse === next.mouse && config.output.gamepad === next.gamepad) {
+      return;
+    }
+    await applyPatch({ output: next });
   };
 
   const updateRegion = async (nextRegion: RegionConfig) => {
@@ -614,6 +620,21 @@ function Content() {
         {showRuntimeConfig ? (
           <PanelSection title="Runtime config">
             <PanelSectionRow>
+              <SectionCard
+                title="Aim output mode"
+                subtitle="One-tap switch, applied immediately (restarts the daemon). Mouse = mouse-look games. Controller = a virtual right stick for controller-first games that ignore the mouse (e.g. Slyders). Keep uzdoom-style games on Mouse, since the gamepad is seen as a second controller."
+              >
+                <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                  <ButtonItem onClick={() => void setAimMode("mouse")}>
+                    {aimMode === "mouse" ? "✓ Mouse" : "Mouse"}
+                  </ButtonItem>
+                  <ButtonItem onClick={() => void setAimMode("gamepad")}>
+                    {aimMode === "gamepad" ? "✓ Controller" : "Controller"}
+                  </ButtonItem>
+                </div>
+              </SectionCard>
+            </PanelSectionRow>
+            <PanelSectionRow>
               <SectionCard title="Runtime enabled" subtitle="Enable or disable the daemon's runtime config.">
                 <label style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
                   <input
@@ -625,34 +646,6 @@ function Content() {
                     {config.global.enabled ? "Enabled" : "Disabled"}
                   </span>
                 </label>
-              </SectionCard>
-            </PanelSectionRow>
-
-            <PanelSectionRow>
-              <SectionCard
-                title="Output devices"
-                subtitle="If a game also treats the virtual gamepad as a second controller (e.g. uzdoom) and double-applies aim, disable the gamepad. Applies immediately (restarts the daemon)."
-              >
-                <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                    <input
-                      type="checkbox"
-                      checked={config.output.mouse}
-                      disabled={!config.output.gamepad}
-                      onChange={(event) => void updateOutput({ mouse: event.currentTarget.checked })}
-                    />
-                    <span style={{ color: "#e8ebf5", fontWeight: 600 }}>Virtual mouse</span>
-                  </label>
-                  <label style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                    <input
-                      type="checkbox"
-                      checked={config.output.gamepad}
-                      disabled={!config.output.mouse}
-                      onChange={(event) => void updateOutput({ gamepad: event.currentTarget.checked })}
-                    />
-                    <span style={{ color: "#e8ebf5", fontWeight: 600 }}>Virtual gamepad</span>
-                  </label>
-                </div>
               </SectionCard>
             </PanelSectionRow>
 
