@@ -55,3 +55,8 @@ out/*
 cli/
 cli/*
 cli/decky
+
+# AGENTS.md and .claude are symlinks to the daemon repo for local editing.
+# Not tracked here: they would be broken for standalone clones/packaging.
+AGENTS.md
+.claude
