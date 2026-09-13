@@ -12,6 +12,7 @@ This plugin packages the daemon binary and installer script, then calls the daem
 - Touchscreen-only udev rule plus uinput access rule
 - Enable or disable the daemon runtime config
 - Tune core motion sliders
+- Multitouch protection: extra simultaneous contacts cannot jump the cursor
 - Control the systemd service from Game Mode
 - Leave profiles for a future iteration
 
