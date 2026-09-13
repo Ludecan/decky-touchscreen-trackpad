@@ -54,8 +54,9 @@ class Plugin:
             "global": {"enabled": True},
             "input": {"max_touch_frame_age_ms": 60},
             "region": {"x_min": 0.5, "x_max": 1.0, "y_min": 0.0, "y_max": 1.0},
-            "motion": {"sensitivity": 4.1, "accel_strength": 0.6, "accel_exponent": 1.2, "smoothing": 0.5, "deadzone": 0.0002},
-            "inertia": {"enabled": True, "friction": 0.20, "cutoff": 0.01},
+            "motion": {"sensitivity": 3.1, "accel_strength": 0.4, "accel_exponent": 1.2, "smoothing": 0.1, "deadzone": 0.00005},
+            "inertia": {"enabled": True, "friction": 0.35, "cutoff": 0.001},
+            "multitouch": {"enabled": True},
             "tap": {"enabled": True, "max_duration_ms": 180, "max_movement": 0.02},
             "output": {"mouse": True, "gamepad": False},
         }
@@ -120,7 +121,7 @@ class Plugin:
         return json.dumps(value)
 
     def _serialize_config(self, config):
-        sections = ["global", "input", "region", "motion", "inertia", "tap", "output"]
+        sections = ["global", "input", "region", "motion", "inertia", "multitouch", "tap", "output"]
         lines = []
 
         for section in sections:
@@ -282,7 +283,7 @@ class Plugin:
                 install_config.write_text(config_source.read_text(encoding="utf-8"), encoding="utf-8")
             else:
                 install_config.write_text(
-                    """[global]\nenabled = true\n\n[input]\nmax_touch_frame_age_ms = 60\n\n[region]\nx_min = 0.5\nx_max = 1.0\ny_min = 0.0\ny_max = 1.0\n\n[motion]\nsensitivity = 4.1\naccel_strength = 0.6\naccel_exponent = 1.2\nsmoothing = 0.5\ndeadzone = 0.0002\n\n[inertia]\nenabled = true\nfriction = 0.20\ncutoff = 0.01\n\n[output]\nmouse = true\ngamepad = false\n""",
+                    """[global]\nenabled = true\n\n[input]\nmax_touch_frame_age_ms = 60\n\n[region]\nx_min = 0.5\nx_max = 1.0\ny_min = 0.0\ny_max = 1.0\n\n[motion]\nsensitivity = 3.1\naccel_strength = 0.4\naccel_exponent = 1.2\nsmoothing = 0.1\ndeadzone = 0.00005\n\n[inertia]\nenabled = true\nfriction = 0.35\ncutoff = 0.001\n\n[multitouch]\nenabled = true\n\n[output]\nmouse = true\ngamepad = false\n""",
                     encoding="utf-8",
                 )
 

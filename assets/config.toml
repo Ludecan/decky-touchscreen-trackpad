@@ -15,26 +15,32 @@ y_max = 1.0
 
 [motion]
 # Base movement multiplier.
-sensitivity = 4.1
+sensitivity = 3.1
 # How strongly speed amplifies movement (0.0 = off).
-accel_strength = 0.6
+accel_strength = 0.4
 # Power-law exponent for the acceleration curve.
 accel_exponent = 1.2
 # Smoothing strength (0.0 = crisp / no smoothing, 1.0 = maximum smoothing).
-smoothing = 0.5
+smoothing = 0.1
 # Minimum per-frame delta magnitude (in screen fractions) required to register
 # movement. On a ~240 Hz touchscreen each frame's delta is tiny, so keep this
 # small (0.0-0.002); large values erase slow motion and cause chop.
-deadzone = 0.0002
+deadzone = 0.00005
 
 [inertia]
 # Trackball-style glide. Starts when movement stops (a still finger, pressed or
 # lifted, decays the last velocity to a stop) rather than only on lift.
 enabled = true
 # Stopping strength (0.0 = longest glide, 1.0 = stops immediately).
-friction = 0.20
+friction = 0.35
 # Stop inertia when speed drops below this value.
-cutoff = 0.01
+cutoff = 0.001
+
+[multitouch]
+# While the tracked finger is down, ignore extra simultaneous contacts so a
+# tilting thumb or resting fingers cannot jump the cursor. With it off, the
+# most recent contact takes over tracking (re-anchored, still no jump).
+enabled = true
 
 [tap]
 # Enable tap-to-click when the touch is short and stays nearly still.
