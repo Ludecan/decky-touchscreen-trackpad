@@ -1,4 +1,4 @@
-import { ButtonItem, ModalRoot, PanelSection, PanelSectionRow, SliderField, staticClasses, TextField } from "@decky/ui";
+import { ButtonItem, ModalRoot, PanelSection, PanelSectionRow, SliderField, staticClasses, TextField, ToggleField } from "@decky/ui";
 import { callable, definePlugin, toaster } from "@decky/api";
 import { useEffect, useRef, useState } from "react";
 import { FaWaveSquare } from "react-icons/fa";
@@ -24,6 +24,10 @@ type InertiaConfig = {
   cutoff: number;
 };
 
+type MultitouchConfig = {
+  enabled: boolean;
+};
+
 type OutputConfig = {
   mouse: boolean;
   gamepad: boolean;
@@ -39,6 +43,7 @@ type DaemonConfig = {
   region: RegionConfig;
   motion: MotionConfig;
   inertia: InertiaConfig;
+  multitouch: MultitouchConfig;
   output: OutputConfig;
 };
 
@@ -72,13 +77,14 @@ const defaultConfig: DaemonConfig = {
   input: { max_touch_frame_age_ms: 60 },
   region: { x_min: 0.5, x_max: 1.0, y_min: 0.0, y_max: 1.0 },
   motion: {
-    sensitivity: 4.1,
-    accel_strength: 0.6,
+    sensitivity: 3.1,
+    accel_strength: 0.4,
     accel_exponent: 1.2,
-    smoothing: 0.5,
-    deadzone: 0.0002,
+    smoothing: 0.1,
+    deadzone: 0.00005,
   },
-  inertia: { enabled: true, friction: 0.20, cutoff: 0.01 },
+  inertia: { enabled: true, friction: 0.35, cutoff: 0.001 },
+  multitouch: { enabled: true },
   output: { mouse: true, gamepad: false },
 };
 
@@ -168,6 +174,9 @@ function normalizeConfig(config: Partial<DaemonConfig> | null | undefined): Daem
       friction: config?.inertia?.friction ?? defaultConfig.inertia.friction,
       cutoff: config?.inertia?.cutoff ?? defaultConfig.inertia.cutoff,
     },
+    multitouch: {
+      enabled: config?.multitouch?.enabled ?? defaultConfig.multitouch.enabled,
+    },
     output: {
       mouse: config?.output?.mouse ?? defaultConfig.output.mouse,
       gamepad: config?.output?.gamepad ?? defaultConfig.output.gamepad,
@@ -182,6 +191,7 @@ function mergePatch(base: DaemonConfig, patch: PartialDaemonConfig): DaemonConfi
     region: patch.region ?? base.region,
     motion: patch.motion ?? base.motion,
     inertia: patch.inertia ?? base.inertia,
+    multitouch: patch.multitouch ?? base.multitouch,
     output: patch.output ?? base.output,
   });
 }
@@ -222,26 +232,12 @@ function Badge({ active, label }: { active: boolean; label: string }) {
   );
 }
 
-function SectionCard({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
+function SubHeader({ title, subtitle }: { title: string; subtitle: string }) {
   return (
-    <section
-      style={{
-        width: "100%",
-        minWidth: 0,
-        boxSizing: "border-box",
-        padding: "1rem",
-        borderRadius: 18,
-        background: "rgba(13, 18, 30, 0.88)",
-        border: "1px solid rgba(137, 145, 175, 0.18)",
-        boxShadow: "0 18px 45px rgba(0, 0, 0, 0.26)",
-      }}
-    >
-      <div style={{ marginBottom: "0.9rem" }}>
-        <div style={{ fontSize: "1rem", fontWeight: 700, color: "#f4f6fb" }}>{title}</div>
-        <div style={{ marginTop: 4, fontSize: "0.85rem", color: "#aeb5c7" }}>{subtitle}</div>
-      </div>
-      {children}
-    </section>
+    <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: "0.4rem 0" }}>
+      <span style={{ color: "#f4f6fb", fontWeight: 700 }}>{title}</span>
+      <span style={{ color: "#aeb5c7", fontSize: "0.82rem", lineHeight: 1.4 }}>{subtitle}</span>
+    </div>
   );
 }
 
@@ -263,7 +259,7 @@ function SliderRow({
   onChange: (value: number) => void;
 }) {
   return (
-    <div style={{ marginBottom: "0.9rem" }}>
+    <PanelSectionRow>
       <SliderField
         label={label}
         description={format(value)}
@@ -275,7 +271,7 @@ function SliderRow({
         highlightOnFocus
         onChange={onChange}
       />
-    </div>
+    </PanelSectionRow>
   );
 }
 
@@ -529,6 +525,10 @@ function Content() {
     await applyPatch({ inertia: nextInertia });
   };
 
+  const updateMultitouch = async (nextMultitouch: MultitouchConfig) => {
+    await applyPatch({ multitouch: nextMultitouch });
+  };
+
   const updateRegionBounds = async (key: keyof RegionConfig, rawValue: number) => {
     const nextRegion = { ...config.region };
     const value = clamp(rawValue, 0, 1);
@@ -557,8 +557,15 @@ function Content() {
     <div
       style={{
         minHeight: "100%",
-        padding: "1rem",
+        // No horizontal padding: Steam sizes rows to the tab panel width, and
+        // extra side padding makes fixed-width sliders overflow their row.
+        padding: "1rem 0",
         width: "100%",
+        // The QAM tab panel is content-sized, so a plain 100% width does not
+        // constrain children. The rem cap keeps the layout inside the panel's
+        // clip edge even when the parent has an indefinite width.
+        minWidth: 0,
+        maxWidth: "min(100%, 28rem)",
         boxSizing: "border-box",
         overflowX: "hidden",
         background: "linear-gradient(160deg, rgba(6, 10, 18, 0.98), rgba(13, 21, 37, 0.94))",
@@ -587,7 +594,7 @@ function Content() {
             <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
               <div className={staticClasses.Title}>Touchscreen Trackpad</div>
               {!daemonInstalled ? (
-                <div style={{ color: "#aeb5c7", fontSize: "0.92rem", maxWidth: 680, lineHeight: 1.45 }}>
+                <div style={{ color: "#aeb5c7", fontSize: "0.92rem", maxWidth: "100%", lineHeight: 1.45 }}>
                   Decky plugin for managing the touchscreen-trackpad service. Turn your touchscreen into a configurable trackpad virtual mouse/gamepad input.
                 </div>
               ) : null}
@@ -618,165 +625,196 @@ function Content() {
         </section>
 
         {showRuntimeConfig ? (
-          <PanelSection title="Runtime config">
-            <PanelSectionRow>
-              <SectionCard
-                title="Aim output mode"
-                subtitle="One-tap switch, applied immediately (restarts the daemon). Mouse = mouse-look games. Controller = a virtual right stick for controller-first games that ignore the mouse (e.g. Slyders). Keep uzdoom-style games on Mouse, since the gamepad is seen as a second controller."
-              >
-                <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-                  <ButtonItem onClick={() => void setAimMode("mouse")}>
+          <>
+            <PanelSection title="Aim output mode">
+              <PanelSectionRow>
+                <SubHeader
+                  title="One-tap switch"
+                  subtitle="Applied immediately (restarts the daemon). Mouse = mouse-look games. Controller = a virtual right stick for controller-first games that ignore the mouse (e.g. Slyders). Keep uzdoom-style games on Mouse, since the gamepad is seen as a second controller."
+                />
+              </PanelSectionRow>
+              <PanelSectionRow>
+                {/* layout="below" keeps the pill out of the Field right-column,
+                    which is capped at 50% width and misaligns it from the
+                    focus highlight in inline mode. */}
+                <div
+                  style={{
+                    display: "flex",
+                    gap: "0.5rem",
+                    flexWrap: "wrap",
+                    justifyContent: "center",
+                    width: "100%",
+                  }}
+                >
+                  <ButtonItem layout="below" onClick={() => void setAimMode("mouse")}>
                     {aimMode === "mouse" ? "✓ Mouse" : "Mouse"}
                   </ButtonItem>
-                  <ButtonItem onClick={() => void setAimMode("gamepad")}>
+                  <ButtonItem layout="below" onClick={() => void setAimMode("gamepad")}>
                     {aimMode === "gamepad" ? "✓ Controller" : "Controller"}
                   </ButtonItem>
                 </div>
-              </SectionCard>
-            </PanelSectionRow>
-            <PanelSectionRow>
-              <SectionCard title="Runtime enabled" subtitle="Enable or disable the daemon's runtime config.">
-                <label style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-                  <input
-                    type="checkbox"
-                    checked={config.global.enabled}
-                    onChange={(event) => void toggleEnabled(event.currentTarget.checked)}
-                  />
-                  <span style={{ color: "#e8ebf5", fontWeight: 600 }}>
-                    {config.global.enabled ? "Enabled" : "Disabled"}
-                  </span>
-                </label>
-              </SectionCard>
-            </PanelSectionRow>
+              </PanelSectionRow>
+            </PanelSection>
 
-            <PanelSectionRow>
-              <SectionCard title="Input timing" subtitle="Tune how aggressively the UI drops delayed touch frames.">
-                <SliderRow
-                  label="Max frame age"
-                  value={config.input.max_touch_frame_age_ms}
-                  min={4}
-                  max={100}
-                  step={1}
-                  format={(value) => `${value.toFixed(0)} ms`}
-                  onChange={(value) => void updateInput({ ...config.input, max_touch_frame_age_ms: value })}
+            <PanelSection title="Runtime config">
+              <PanelSectionRow>
+                <ToggleField
+                  label={config.global.enabled ? "Enabled" : "Disabled"}
+                  checked={config.global.enabled}
+                  highlightOnFocus
+                  onChange={(checked) => void toggleEnabled(checked)}
                 />
-              </SectionCard>
-            </PanelSectionRow>
+              </PanelSectionRow>
 
-            <PanelSectionRow>
-              <SectionCard title="Motion" subtitle="Live trackpad tuning parameters.">
-                <SliderRow
-                  label="Sensitivity"
-                  value={config.motion.sensitivity}
-                  min={0.1}
-                  max={50}
-                  step={0.5}
-                  format={(value) => `${value.toFixed(1)}x`}
-                  onChange={(value) => void updateMotion({ ...config.motion, sensitivity: value })}
+              <PanelSectionRow>
+                <SubHeader
+                  title="Input timing"
+                  subtitle="Tune how aggressively the UI drops delayed touch frames."
                 />
-                <SliderRow
-                  label="Acceleration strength"
-                  value={config.motion.accel_strength}
-                  min={0}
-                  max={2}
-                  step={0.01}
-                  format={(value) => value.toFixed(2)}
-                  onChange={(value) => void updateMotion({ ...config.motion, accel_strength: value })}
-                />
-                <SliderRow
-                  label="Acceleration exponent"
-                  value={config.motion.accel_exponent}
-                  min={0.5}
-                  max={3}
-                  step={0.01}
-                  format={(value) => value.toFixed(2)}
-                  onChange={(value) => void updateMotion({ ...config.motion, accel_exponent: value })}
-                />
-                <SliderRow
-                  label="Smoothing (higher = smoother)"
-                  value={config.motion.smoothing}
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  format={(value) => value.toFixed(2)}
-                  onChange={(value) => void updateMotion({ ...config.motion, smoothing: value })}
-                />
-                <SliderRow
-                  label="Deadzone"
-                  value={config.motion.deadzone}
-                  min={0}
-                  max={0.005}
-                   step={0.00005}
-                   format={(value) => value.toFixed(5)}
-                  onChange={(value) => void updateMotion({ ...config.motion, deadzone: value })}
-                />
-              </SectionCard>
-            </PanelSectionRow>
+              </PanelSectionRow>
+              <SliderRow
+                label="Max frame age"
+                value={config.input.max_touch_frame_age_ms}
+                min={4}
+                max={100}
+                step={1}
+                format={(value) => `${value.toFixed(0)} ms`}
+                onChange={(value) => void updateInput({ ...config.input, max_touch_frame_age_ms: value })}
+              />
 
-            <PanelSectionRow>
-              <SectionCard title="Inertia" subtitle="Glide that settles when movement stops (pressed or lifted).">
-                <SliderRow
-                  label="Friction (higher = stops sooner)"
-                  value={config.inertia.friction}
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  format={(value) => value.toFixed(2)}
-                  onChange={(value) => void updateInertia({ ...config.inertia, friction: value })}
-                />
-                <SliderRow
-                  label="Cutoff"
-                  value={config.inertia.cutoff}
-                  min={0}
-                  max={0.1}
-                  step={0.001}
-                  format={(value) => value.toFixed(3)}
-                  onChange={(value) => void updateInertia({ ...config.inertia, cutoff: value })}
-                />
-              </SectionCard>
-            </PanelSectionRow>
+              <PanelSectionRow>
+                <SubHeader title="Motion" subtitle="Live trackpad tuning parameters." />
+              </PanelSectionRow>
+              <SliderRow
+                label="Sensitivity"
+                value={config.motion.sensitivity}
+                min={0.1}
+                max={50}
+                step={0.5}
+                format={(value) => `${value.toFixed(1)}x`}
+                onChange={(value) => void updateMotion({ ...config.motion, sensitivity: value })}
+              />
+              <SliderRow
+                label="Acceleration strength"
+                value={config.motion.accel_strength}
+                min={0}
+                max={2}
+                step={0.01}
+                format={(value) => value.toFixed(2)}
+                onChange={(value) => void updateMotion({ ...config.motion, accel_strength: value })}
+              />
+              <SliderRow
+                label="Acceleration exponent"
+                value={config.motion.accel_exponent}
+                min={0.5}
+                max={3}
+                step={0.01}
+                format={(value) => value.toFixed(2)}
+                onChange={(value) => void updateMotion({ ...config.motion, accel_exponent: value })}
+              />
+              <SliderRow
+                label="Smoothing (higher = smoother)"
+                value={config.motion.smoothing}
+                min={0}
+                max={1}
+                step={0.05}
+                format={(value) => value.toFixed(2)}
+                onChange={(value) => void updateMotion({ ...config.motion, smoothing: value })}
+              />
+              <SliderRow
+                label="Deadzone"
+                value={config.motion.deadzone}
+                min={0}
+                max={0.005}
+                step={0.00005}
+                format={(value) => value.toFixed(5)}
+                onChange={(value) => void updateMotion({ ...config.motion, deadzone: value })}
+              />
 
-            <PanelSectionRow>
-              <SectionCard title="Active region" subtitle="Normalized coordinates in the touchscreen space.">
-                <SliderRow
-                  label="Left edge"
-                  value={config.region.x_min}
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  format={(value) => `${Math.round(value * 100)}%`}
-                  onChange={(value) => void updateRegionBounds("x_min", value)}
+              <PanelSectionRow>
+                <SubHeader
+                  title="Inertia"
+                  subtitle="Glide that settles when movement stops (pressed or lifted)."
                 />
-                <SliderRow
-                  label="Right edge"
-                  value={config.region.x_max}
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  format={(value) => `${Math.round(value * 100)}%`}
-                  onChange={(value) => void updateRegionBounds("x_max", value)}
+              </PanelSectionRow>
+              <SliderRow
+                label="Friction (higher = stops sooner)"
+                value={config.inertia.friction}
+                min={0}
+                max={1}
+                step={0.01}
+                format={(value) => value.toFixed(2)}
+                onChange={(value) => void updateInertia({ ...config.inertia, friction: value })}
+              />
+              <SliderRow
+                label="Cutoff"
+                value={config.inertia.cutoff}
+                min={0}
+                max={0.1}
+                step={0.001}
+                format={(value) => value.toFixed(3)}
+                onChange={(value) => void updateInertia({ ...config.inertia, cutoff: value })}
+              />
+
+              <PanelSectionRow>
+                <SubHeader
+                  title="Multitouch protection"
+                  subtitle="Only the first contact drives the cursor while it is down, so extra fingers or a tilting thumb cannot jump the cursor. Off: the most recent contact takes over tracking instead."
                 />
-                <SliderRow
-                  label="Top edge"
-                  value={config.region.y_min}
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  format={(value) => `${Math.round(value * 100)}%`}
-                  onChange={(value) => void updateRegionBounds("y_min", value)}
+              </PanelSectionRow>
+              <PanelSectionRow>
+                <ToggleField
+                  label={config.multitouch.enabled ? "Enabled" : "Disabled"}
+                  checked={config.multitouch.enabled}
+                  highlightOnFocus
+                  onChange={(checked) => void updateMultitouch({ ...config.multitouch, enabled: checked })}
                 />
-                <SliderRow
-                  label="Bottom edge"
-                  value={config.region.y_max}
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  format={(value) => `${Math.round(value * 100)}%`}
-                  onChange={(value) => void updateRegionBounds("y_max", value)}
+              </PanelSectionRow>
+
+              <PanelSectionRow>
+                <SubHeader
+                  title="Active region"
+                  subtitle="Normalized coordinates in the touchscreen space."
                 />
-              </SectionCard>
-            </PanelSectionRow>
-          </PanelSection>
+              </PanelSectionRow>
+              <SliderRow
+                label="Left edge"
+                value={config.region.x_min}
+                min={0}
+                max={1}
+                step={0.01}
+                format={(value) => `${Math.round(value * 100)}%`}
+                onChange={(value) => void updateRegionBounds("x_min", value)}
+              />
+              <SliderRow
+                label="Right edge"
+                value={config.region.x_max}
+                min={0}
+                max={1}
+                step={0.01}
+                format={(value) => `${Math.round(value * 100)}%`}
+                onChange={(value) => void updateRegionBounds("x_max", value)}
+              />
+              <SliderRow
+                label="Top edge"
+                value={config.region.y_min}
+                min={0}
+                max={1}
+                step={0.01}
+                format={(value) => `${Math.round(value * 100)}%`}
+                onChange={(value) => void updateRegionBounds("y_min", value)}
+              />
+              <SliderRow
+                label="Bottom edge"
+                value={config.region.y_max}
+                min={0}
+                max={1}
+                step={0.01}
+                format={(value) => `${Math.round(value * 100)}%`}
+                onChange={(value) => void updateRegionBounds("y_max", value)}
+              />
+            </PanelSection>
+          </>
         ) : null}
 
         {authModalOpen ? (
