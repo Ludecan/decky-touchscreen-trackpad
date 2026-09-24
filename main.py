@@ -28,18 +28,18 @@ def _deep_merge(base, patch):
 
 class Plugin:
     def __init__(self):
-        self.loop = None
         self.plugin_root = Path(__file__).resolve().parent
         self.log_dir = Path(os.environ.get("TOUCHSCREEN_TRACKPAD_LOG_DIR", Path.home() / ".local/state/touchscreen-trackpad"))
         self.plugin_log_path = Path(os.environ.get("TOUCHSCREEN_TRACKPAD_PLUGIN_LOG_FILE", self.log_dir / "plugin.log"))
-        self.socket_timeout = float(os.environ.get("TOUCHSCREEN_TRACKPAD_SOCKET_TIMEOUT", "2.0"))
+        self.xdg_runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
         self.socket_candidates = [
             os.environ.get("TOUCHSCREEN_TRACKPAD_SOCKET"),
+            f"{self.xdg_runtime_dir}/touchscreen-trackpad.sock" if self.xdg_runtime_dir else None,
             "/tmp/touchscreen-trackpad.sock",
-            "/run/touchscreen-trackpad.sock",
         ]
         self.service_name = os.environ.get("TOUCHSCREEN_TRACKPAD_SERVICE", "touchscreen-trackpad.service")
-        self.systemctl_scope = os.environ.get("TOUCHSCREEN_TRACKPAD_SYSTEMCTL_SCOPE", "user")
+        raw_scope = os.environ.get("TOUCHSCREEN_TRACKPAD_SYSTEMCTL_SCOPE", "user")
+        self.systemctl_scope = raw_scope if raw_scope in {"user", "system"} else "user"
         self.install_root = Path.home() / ".local/share/touchscreen-trackpad"
         self.install_binary = self.install_root / "touchscreen-trackpad"
         self.user_unit_path = Path.home() / ".config/systemd/user" / self.service_name
@@ -199,12 +199,10 @@ class Plugin:
         return env
 
     def _service_command(self, action):
-        scope = self.systemctl_scope if self.systemctl_scope in {"user", "system"} else "user"
-        return ["systemctl", f"--{scope}", action, self.service_name]
+        return ["systemctl", f"--{self.systemctl_scope}", action, self.service_name]
 
     def _run_systemctl(self, *args):
-        scope = self.systemctl_scope if self.systemctl_scope in {"user", "system"} else "user"
-        command = ["systemctl", f"--{scope}", *args]
+        command = ["systemctl", f"--{self.systemctl_scope}", *args]
 
         completed = subprocess.run(command, capture_output=True, text=True, env=self._subprocess_env(), check=False)
         if completed.returncode != 0:
@@ -346,7 +344,9 @@ class Plugin:
                     "",
                 ]
             )
-            rule_file = Path(tempfile.mkstemp(prefix="touchscreen-trackpad-rule.")[1])
+            rule_fd, rule_name = tempfile.mkstemp(prefix="touchscreen-trackpad-rule.")
+            os.close(rule_fd)
+            rule_file = Path(rule_name)
             try:
                 rule_file.write_text(rule_contents, encoding="utf-8")
                 self._run_authorized_udev_helper("install", rule_file, self.udev_rule_path, auth_password=auth_password)
@@ -386,6 +386,7 @@ class Plugin:
         self.user_unit_path.unlink(missing_ok=True)
         self.install_binary.unlink(missing_ok=True)
         self.plugin_log_path.unlink(missing_ok=True)
+        (self.log_dir / "daemon.log").unlink(missing_ok=True)
         try:
             self.log_dir.rmdir()
         except OSError:
@@ -409,40 +410,25 @@ class Plugin:
             if candidate:
                 return candidate
 
-        return "/run/touchscreen-trackpad.sock"
+        return "/tmp/touchscreen-trackpad.sock"
 
-    def _read_response(self, client):
-        buffer = b""
-        while True:
-            chunk = client.recv(4096)
-            if not chunk:
-                break
-            buffer += chunk
-            if b"\n" in buffer:
-                break
-
-        text = buffer.decode("utf-8", errors="replace").strip()
-        if not text:
-            return {"ok": True}
-
-        line = text.splitlines()[-1]
-        return json.loads(line)
-
-    def _rpc(self, method, params=None):
-        socket_path = self._resolve_socket_path()
-        payload = {"method": method, "params": params or {}}
-
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-            client.settimeout(self.socket_timeout)
-            client.connect(socket_path)
-            client.sendall((json.dumps(payload) + "\n").encode("utf-8"))
-            response = self._read_response(client)
-
-        if isinstance(response, dict) and response.get("ok") is False:
-            message = response.get("error") or response.get("message") or "daemon request failed"
-            raise RuntimeError(message)
-
-        return response
+    def _daemon_responding(self, timeout=1.5):
+        # The status line protocol the daemon speaks (first line = command).
+        # A live control plane proves the daemon process is up and usable.
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                client.settimeout(timeout)
+                client.connect(self._resolve_socket_path())
+                client.sendall(b"status\n")
+                buffer = b""
+                while True:
+                    chunk = client.recv(4096)
+                    if not chunk:
+                        break
+                    buffer += chunk
+                return b'"running"' in buffer
+        except OSError:
+            return False
 
     def _read_service_status(self):
         completed = subprocess.run(
@@ -495,8 +481,9 @@ class Plugin:
         # Type=simple units report "started" before the process gets to fail,
         # so poll briefly and surface the real crash reason instead of a
         # phantom "started" that flips back to "stopped" on the next refresh.
+        # A live control socket proves the daemon is actually serving IPC.
         for attempt in range(attempts):
-            if self._service_active():
+            if self._service_active() and self._daemon_responding():
                 return
             if attempt < attempts - 1:
                 time.sleep(delay)
@@ -534,7 +521,9 @@ class Plugin:
         return await asyncio.to_thread(self._collect_state)
 
     def _effective_output(self, config):
-        output = {"mouse": True, "gamepad": True}
+        # Defaults must match the daemon's OutputConfig (gamepad off) so the
+        # restart decision does not fire on a config that lacks the section.
+        output = {"mouse": True, "gamepad": False}
         if isinstance(config, dict):
             section = config.get("output")
             if isinstance(section, dict):
@@ -580,14 +569,7 @@ class Plugin:
 
     async def start_daemon(self):
         try:
-            await asyncio.to_thread(
-                subprocess.run,
-                ["systemctl", "--user", "reset-failed", self.service_name],
-                capture_output=True,
-                text=True,
-                env=self._subprocess_env(),
-                check=False,
-            )
+            await asyncio.to_thread(self._run_systemctl, "reset-failed", self.service_name)
             await asyncio.to_thread(self._run_systemctl, "enable", "--now", self.service_name)
             await asyncio.to_thread(self._verify_daemon_started)
             return await self.get_state()
@@ -605,14 +587,7 @@ class Plugin:
 
     async def restart_daemon(self):
         try:
-            await asyncio.to_thread(
-                subprocess.run,
-                ["systemctl", "--user", "reset-failed", self.service_name],
-                capture_output=True,
-                text=True,
-                env=self._subprocess_env(),
-                check=False,
-            )
+            await asyncio.to_thread(self._run_systemctl, "reset-failed", self.service_name)
             await asyncio.to_thread(self._run_systemctl, "restart", self.service_name)
             await asyncio.to_thread(self._verify_daemon_started)
             return await self.get_state()
@@ -620,16 +595,15 @@ class Plugin:
             self._log_exception("Failed to restart daemon", error)
             raise
 
-    async def repair_daemon(self):
+    async def repair_daemon(self, auth_password=""):
         try:
-            await asyncio.to_thread(self._install_daemon)
+            await asyncio.to_thread(self._install_daemon, auth_password)
             return await self.get_state()
         except Exception as error:
             self._log_exception("Failed to repair daemon", error)
             raise
 
     async def _main(self):
-        self.loop = asyncio.get_event_loop()
         decky.logger.info("Touchscreen Trackpad backend loaded")
         try:
             await asyncio.to_thread(self._read_config_file)
