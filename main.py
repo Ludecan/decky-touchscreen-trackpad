@@ -313,7 +313,7 @@ class Plugin:
                     "[Service]",
                     "Type=simple",
                     f"ExecStart={self.install_binary} {install_config}",
-                    f"Environment=TOUCHSCREEN_TRACKPAD_SOCKET={self._resolve_socket_path()}",
+                    f"Environment=TOUCHSCREEN_TRACKPAD_SOCKET={self._preferred_socket_path()}",
                     f"Environment=RUST_LOG={os.environ.get('RUST_LOG', 'info')}",
                     f"StandardOutput=append:{log_file}",
                     f"StandardError=append:{log_file}",
@@ -398,6 +398,14 @@ class Plugin:
 
         return {"ok": True, "stdout": f"Uninstalled {self.service_name}", "stderr": ""}
 
+    def _preferred_socket_path(self):
+        # Deterministic default for the unit file, independent of any socket
+        # left behind by a previous install.
+        for candidate in self.socket_candidates:
+            if candidate:
+                return candidate
+        return "/tmp/touchscreen-trackpad.sock"
+
     def _resolve_socket_path(self):
         for candidate in self.socket_candidates:
             if not candidate:
@@ -406,20 +414,18 @@ class Plugin:
             if path.exists() and stat.S_ISSOCK(path.stat().st_mode):
                 return str(path)
 
-        for candidate in self.socket_candidates:
-            if candidate:
-                return candidate
-
-        return "/tmp/touchscreen-trackpad.sock"
+        return self._preferred_socket_path()
 
     def _daemon_responding(self, timeout=1.5):
-        # The status line protocol the daemon speaks (first line = command).
-        # A live control plane proves the daemon process is up and usable.
+        # The daemon answers once the request is complete, and it detects the
+        # end of the request when the write half is closed. Half-close after
+        # sending or the reply never arrives.
         try:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
                 client.settimeout(timeout)
                 client.connect(self._resolve_socket_path())
                 client.sendall(b"status\n")
+                client.shutdown(socket.SHUT_WR)
                 buffer = b""
                 while True:
                     chunk = client.recv(4096)
