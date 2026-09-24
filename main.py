@@ -305,6 +305,12 @@ class Plugin:
                     "[Unit]",
                     "Description=Touchscreen Trackpad daemon",
                     "After=graphical-session.target",
+                    # The session ACL for the touchscreen can land after the
+                    # service starts; the daemon now waits for it. Keep
+                    # systemd's start-rate limiting off so a quick restart on
+                    # output changes can't strand the unit in a failed state.
+                    "StartLimitIntervalSec=0",
+                    "StartLimitBurst=0",
                     "",
                     "[Service]",
                     "Type=simple",
@@ -354,7 +360,7 @@ class Plugin:
                 self._run_authorized_udev_helper("uninstall", self.legacy_udev_rule_path, auth_password=auth_password)
 
             subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True, env=self._subprocess_env(), check=False)
-            subprocess.run(["systemctl", "--user", "reset-failure", self.service_name], capture_output=True, text=True, env=self._subprocess_env(), check=False)
+            subprocess.run(["systemctl", "--user", "reset-failed", self.service_name], capture_output=True, text=True, env=self._subprocess_env(), check=False)
             completed = subprocess.run(["systemctl", "--user", "enable", "--now", self.service_name], capture_output=True, text=True, env=self._subprocess_env(), check=False)
             if completed.returncode != 0:
                 raise RuntimeError(
@@ -548,7 +554,7 @@ class Plugin:
             ) != self._effective_output(merged_config)
             await asyncio.to_thread(self._write_config_file, merged_config)
             if output_changed:
-                await asyncio.to_thread(self._run_systemctl, "reset-failure", self.service_name)
+                await asyncio.to_thread(self._run_systemctl, "reset-failed", self.service_name)
                 await asyncio.to_thread(self._run_systemctl, "restart", self.service_name)
                 await asyncio.to_thread(self._verify_daemon_started)
             return await self.get_state()
@@ -576,7 +582,7 @@ class Plugin:
         try:
             await asyncio.to_thread(
                 subprocess.run,
-                ["systemctl", "--user", "reset-failure", self.service_name],
+                ["systemctl", "--user", "reset-failed", self.service_name],
                 capture_output=True,
                 text=True,
                 env=self._subprocess_env(),
@@ -601,7 +607,7 @@ class Plugin:
         try:
             await asyncio.to_thread(
                 subprocess.run,
-                ["systemctl", "--user", "reset-failure", self.service_name],
+                ["systemctl", "--user", "reset-failed", self.service_name],
                 capture_output=True,
                 text=True,
                 env=self._subprocess_env(),
