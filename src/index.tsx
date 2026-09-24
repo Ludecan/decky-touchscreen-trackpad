@@ -28,6 +28,12 @@ type MultitouchConfig = {
   enabled: boolean;
 };
 
+type TapConfig = {
+  enabled: boolean;
+  max_duration_ms: number;
+  max_movement: number;
+};
+
 type OutputConfig = {
   mouse: boolean;
   gamepad: boolean;
@@ -44,6 +50,7 @@ type DaemonConfig = {
   motion: MotionConfig;
   inertia: InertiaConfig;
   multitouch: MultitouchConfig;
+  tap: TapConfig;
   output: OutputConfig;
 };
 
@@ -85,6 +92,7 @@ const defaultConfig: DaemonConfig = {
   },
   inertia: { enabled: true, friction: 0.35, cutoff: 0.001 },
   multitouch: { enabled: true },
+  tap: { enabled: true, max_duration_ms: 180, max_movement: 0.02 },
   output: { mouse: true, gamepad: false },
 };
 
@@ -177,6 +185,11 @@ function normalizeConfig(config: Partial<DaemonConfig> | null | undefined): Daem
     multitouch: {
       enabled: config?.multitouch?.enabled ?? defaultConfig.multitouch.enabled,
     },
+    tap: {
+      enabled: config?.tap?.enabled ?? defaultConfig.tap.enabled,
+      max_duration_ms: config?.tap?.max_duration_ms ?? defaultConfig.tap.max_duration_ms,
+      max_movement: config?.tap?.max_movement ?? defaultConfig.tap.max_movement,
+    },
     output: {
       mouse: config?.output?.mouse ?? defaultConfig.output.mouse,
       gamepad: config?.output?.gamepad ?? defaultConfig.output.gamepad,
@@ -192,6 +205,7 @@ function mergePatch(base: DaemonConfig, patch: PartialDaemonConfig): DaemonConfi
     motion: patch.motion ?? base.motion,
     inertia: patch.inertia ?? base.inertia,
     multitouch: patch.multitouch ?? base.multitouch,
+    tap: patch.tap ?? base.tap,
     output: patch.output ?? base.output,
   });
 }
@@ -281,7 +295,7 @@ function Content() {
   const [, setLoading] = useState(true);
   const [, setSaving] = useState(false);
   const [installing, setInstalling] = useState(false);
-  const [, setInlineError] = useState<InlineError | null>(null);
+  const [inlineError, setInlineError] = useState<InlineError | null>(null);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authPassword, setAuthPassword] = useState("");
   const [authMode, setAuthMode] = useState<"install" | "uninstall" | null>(null);
@@ -300,7 +314,9 @@ function Content() {
         window.clearTimeout(saveTimerRef.current);
       }
       if (pendingConfigRef.current) {
-        void setConfig(pendingConfigRef.current);
+        // Best-effort flush on unmount; the panel is gone, so nothing can
+        // report a failure.
+        void setConfig(pendingConfigRef.current).catch(() => {});
       }
     };
   }, []);
@@ -314,7 +330,7 @@ function Content() {
         e.stopImmediatePropagation();
         setAuthBusy(true);
         setAuthError(null);
-        runInstall(authPasswordRef.current)
+        runInstall(authPasswordRef.current, authMode ?? "install")
           .then((success) => { if (success) closeAuthorizationModal(); })
           .catch((err: unknown) => { setAuthError(formatError(err)); })
           .finally(() => { setAuthBusy(false); });
@@ -323,7 +339,7 @@ function Content() {
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authModalOpen]);
+  }, [authModalOpen, authMode]);
 
   const recordInlineError = (title: string, call: string, error: unknown) => {
     const message = formatError(error);
@@ -432,28 +448,27 @@ function Content() {
     }
   };
 
-  const runInstall = async (password: string) => {
+  const runInstall = async (password: string, mode: "install" | "uninstall") => {
     await flushPendingConfig();
     setInstalling(true);
+    const isUninstall = mode === "uninstall";
     try {
-      const next = state?.daemon_installed
-        ? await uninstallDaemon(password)
-        : await installDaemon(password);
+      const next = isUninstall ? await uninstallDaemon(password) : await installDaemon(password);
       setState(next);
       if (next.config) {
         setLocalConfig(normalizeConfig(next.config));
       }
       setInlineError(null);
       toaster.toast({
-        title: state?.daemon_installed ? "Daemon uninstalled" : "Daemon installed",
-        body: state?.daemon_installed
+        title: isUninstall ? "Daemon uninstalled" : "Daemon installed",
+        body: isUninstall
           ? "The user service, permissions, and bundled daemon files were removed."
           : "The user service and permissions were installed.",
       });
       return true;
     } catch (error) {
-      const title = state?.daemon_installed ? "Daemon uninstall failed" : "Daemon install failed";
-      const call = state?.daemon_installed ? "uninstallDaemon()" : "installDaemon()";
+      const title = isUninstall ? "Daemon uninstall failed" : "Daemon install failed";
+      const call = isUninstall ? "uninstallDaemon()" : "installDaemon()";
       const message = recordInlineError(title, call, error);
       toaster.toast({
         title,
@@ -484,7 +499,7 @@ function Content() {
     setAuthBusy(true);
     setAuthError(null);
     try {
-      const success = await runInstall(authPassword);
+      const success = await runInstall(authPassword, authMode ?? "install");
       if (success) {
         closeAuthorizationModal();
       }
@@ -527,6 +542,10 @@ function Content() {
 
   const updateMultitouch = async (nextMultitouch: MultitouchConfig) => {
     await applyPatch({ multitouch: nextMultitouch });
+  };
+
+  const updateTap = async (nextTap: TapConfig) => {
+    await applyPatch({ tap: nextTap });
   };
 
   const updateRegionBounds = async (key: keyof RegionConfig, rawValue: number) => {
@@ -773,6 +792,39 @@ function Content() {
 
               <PanelSectionRow>
                 <SubHeader
+                  title="Tap to click"
+                  subtitle="A short, nearly still touch emits a left click on release."
+                />
+              </PanelSectionRow>
+              <PanelSectionRow>
+                <ToggleField
+                  label={config.tap.enabled ? "Enabled" : "Disabled"}
+                  checked={config.tap.enabled}
+                  highlightOnFocus
+                  onChange={(checked) => void updateTap({ ...config.tap, enabled: checked })}
+                />
+              </PanelSectionRow>
+              <SliderRow
+                label="Max tap duration"
+                value={config.tap.max_duration_ms}
+                min={20}
+                max={500}
+                step={10}
+                format={(value) => `${value.toFixed(0)} ms`}
+                onChange={(value) => void updateTap({ ...config.tap, max_duration_ms: value })}
+              />
+              <SliderRow
+                label="Max tap travel"
+                value={config.tap.max_movement}
+                min={0.005}
+                max={0.1}
+                step={0.001}
+                format={(value) => `${(value * 100).toFixed(1)}%`}
+                onChange={(value) => void updateTap({ ...config.tap, max_movement: value })}
+              />
+
+              <PanelSectionRow>
+                <SubHeader
                   title="Active region"
                   subtitle="Normalized coordinates in the touchscreen space."
                 />
@@ -815,6 +867,33 @@ function Content() {
               />
             </PanelSection>
           </>
+        ) : null}
+
+        {inlineError ? (
+          <div
+            style={{
+              padding: "0.9rem 1rem",
+              borderRadius: 16,
+              border: "1px solid rgba(255, 120, 140, 0.35)",
+              background: "rgba(60, 12, 22, 0.65)",
+              color: "#ffbcc6",
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.5rem",
+            }}
+          >
+            <span style={{ fontWeight: 800 }}>{inlineError.title}</span>
+            <span style={{ fontSize: "0.85rem", whiteSpace: "pre-wrap" }}>{inlineError.message}</span>
+            <details style={{ fontSize: "0.75rem", color: "#d8a0ab" }}>
+              <summary>Details ({inlineError.call})</summary>
+              <pre style={{ whiteSpace: "pre-wrap", margin: "0.4rem 0 0" }}>{inlineError.raw}</pre>
+            </details>
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <ButtonItem layout="below" onClick={() => setInlineError(null)}>
+                Dismiss
+              </ButtonItem>
+            </div>
+          </div>
         ) : null}
 
         {authModalOpen ? (
