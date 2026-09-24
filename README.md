@@ -67,7 +67,7 @@ The `Makefile` deploy target uses `rsync` directly into `/home/deck/homebrew/plu
 
 ## Socket defaults
 
-The backend checks `TOUCHSCREEN_TRACKPAD_SOCKET` first, then falls back to `/tmp/touchscreen-trackpad.sock` and `/run/touchscreen-trackpad.sock`.
+The backend checks `TOUCHSCREEN_TRACKPAD_SOCKET` first, then `$XDG_RUNTIME_DIR/touchscreen-trackpad.sock`, then the legacy `/tmp/touchscreen-trackpad.sock`.
 
 # Container creation
 distrobox rm dev
