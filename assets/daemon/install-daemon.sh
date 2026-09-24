@@ -16,7 +16,15 @@ USER_UNIT_PATH=$USER_UNIT_DIR/touchscreen-trackpad.service
 UDEV_RULE_PATH=/etc/udev/rules.d/72-touchscreen-trackpad.rules
 LEGACY_UDEV_RULE_PATH=/etc/udev/rules.d/99-touchscreen-trackpad.rules
 SERVICE_NAME=${TOUCHSCREEN_TRACKPAD_SERVICE:-touchscreen-trackpad.service}
-SOCKET_PATH=${TOUCHSCREEN_TRACKPAD_SOCKET:-/tmp/touchscreen-trackpad.sock}
+# Same resolution order as the daemon binary: explicit env, then the private
+# per-user runtime dir, then the legacy /tmp path.
+if [ -n "${TOUCHSCREEN_TRACKPAD_SOCKET:-}" ]; then
+  SOCKET_PATH="$TOUCHSCREEN_TRACKPAD_SOCKET"
+elif [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+  SOCKET_PATH="$XDG_RUNTIME_DIR/touchscreen-trackpad.sock"
+else
+  SOCKET_PATH="/tmp/touchscreen-trackpad.sock"
+fi
 RUST_LOG=${RUST_LOG:-info}
 LOG_DIR=${TOUCHSCREEN_TRACKPAD_LOG_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/touchscreen-trackpad}
 LOG_FILE=${TOUCHSCREEN_TRACKPAD_LOG_FILE:-$LOG_DIR/daemon.log}
@@ -34,35 +42,16 @@ fi
 
 mkdir -p "$INSTALL_ROOT"
 
-if [ -f "$ROOT/config.toml" ]; then
+# Seed config only on first install. A re-install updates the binary and unit
+# but must never clobber the user's tuning. The bundled config.toml is the
+# single source of default values, so require it instead of falling back to a
+# drifted inline copy.
+if [ ! -f "$INSTALL_CONFIG" ]; then
+  if [ ! -f "$ROOT/config.toml" ]; then
+    echo "bundled config.toml not found at $ROOT/config.toml"
+    exit 1
+  fi
   cp "$ROOT/config.toml" "$INSTALL_CONFIG"
-else
-  cat > "$INSTALL_CONFIG" <<'EOF'
-[global]
-enabled = true
-
-[region]
-x_min = 0.5
-x_max = 1.0
-y_min = 0.0
-y_max = 1.0
-
-[motion]
-sensitivity = 4.1
-accel_strength = 0.6
-accel_exponent = 1.2
-smoothing = 0.5
-deadzone = 0.0002
-
-[inertia]
-enabled = true
-friction = 0.20
-cutoff = 0.01
-
-[output]
-mouse = true
-gamepad = false
-EOF
 fi
 
 TEMP_BINARY=$(mktemp "$INSTALL_ROOT/.touchscreen-trackpad.XXXXXX")

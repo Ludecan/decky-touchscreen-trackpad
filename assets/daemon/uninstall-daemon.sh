@@ -4,7 +4,6 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 INSTALL_ROOT=${TOUCHSCREEN_TRACKPAD_INSTALL_ROOT:-$HOME/.local/share/touchscreen-trackpad}
 INSTALL_BINARY=$INSTALL_ROOT/touchscreen-trackpad
-INSTALL_CONFIG=$INSTALL_ROOT/config.toml
 USER_UNIT_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user
 USER_UNIT_PATH=$USER_UNIT_DIR/touchscreen-trackpad.service
 UDEV_RULE_PATH=/etc/udev/rules.d/72-touchscreen-trackpad.rules
@@ -22,8 +21,8 @@ systemctl --user daemon-reload
 
 rm -f "$USER_UNIT_PATH"
 rm -f "$INSTALL_BINARY"
-rm -f "$INSTALL_CONFIG"
-rm -rf "$INSTALL_ROOT"
+# Keep config.toml and profiles/ on uninstall (same policy as the Decky
+# plugin): user tuning survives reinstall. Remove logs only.
 rm -f "$LOG_FILE"
 rmdir "$LOG_DIR" 2>/dev/null || true
 
@@ -43,5 +42,5 @@ fi
 printf 'Uninstalled %s\n' "$SERVICE_NAME"
 printf 'Removed unit: %s\n' "$USER_UNIT_PATH"
 printf 'Removed binary: %s\n' "$INSTALL_BINARY"
-printf 'Removed config: %s\n' "$INSTALL_CONFIG"
 printf 'Removed log: %s\n' "$LOG_FILE"
+printf 'Kept config and profiles: %s\n' "$INSTALL_ROOT"
